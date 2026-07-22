@@ -1,0 +1,45 @@
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    ports:
+      - "5060:5060/udp"
+      - "10000-10099:10000-10099/udp"
+    environment:
+      PHONE_AGI_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./asterisk/sounds:/var/lib/asterisk/sounds
+      - ./shared:/shared
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  stt:
+    build: ./stt
+    ports:
+      - "8090:8090"
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-tiny.en}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE: int8
+      SHARED_DIR: /shared
+    volumes:
+      - ./shared:/shared
+      - stt-models:/root/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  stt-models:

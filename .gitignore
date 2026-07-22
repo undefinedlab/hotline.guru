@@ -1,0 +1,11 @@
+node_modules/
+data/
+dist/
+.env
+*.db
+telephony/asterisk/sounds/*
+!telephony/asterisk/sounds/.gitkeep
+telephony/asterisk/phone_recordings/
+
+telephony/shared/*
+!telephony/shared/.gitkeep

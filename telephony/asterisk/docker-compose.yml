@@ -1,0 +1,18 @@
+# Prefer: cd .. && docker compose up -d   (Asterisk + STT together)
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    ports:
+      - "5060:5060/udp"
+      - "10000-10099:10000-10099/udp"
+    environment:
+      PHONE_AGI_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./sounds:/var/lib/asterisk/sounds
+      - ../shared:/shared
+    restart: unless-stopped
