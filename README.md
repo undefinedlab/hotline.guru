@@ -1,6 +1,6 @@
 # hotline.guru
 
-Call or text your agent. It spends **USDC on Arc** under a deterministic policy gate — no Twilio Voice bill, no Uniswap.
+Call or text your agent. It spends **USDC on Arc** under a deterministic policy gate.
 
 > Telephony UI → policy leash → Circle / local Arc wallets → x402 marketplace → human-readable payees
 
