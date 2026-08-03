@@ -54,15 +54,16 @@ curl -X POST localhost:8787/v1/message \
 
 ## Commands
 
-Just say it:
-
 | You say | What happens |
 |--------|----------------|
-| `send 10 usdt to +15551234567` | Pays that phone’s Arc wallet (USDC) |
+| *(first call)* | Welcome → name → Arc wallet on your number → set PIN → thanks |
+| `PIN 1234` | Set / change PIN |
+| `send 10 usdt to +15551234567` | Pays that **phone’s** Arc wallet (created if new) — confirm with PIN |
+| `yes 1234` / keypad PIN | Confirms the pending send |
 | `balance` / `history` | Check funds / last txs |
-| `send 100 usdt to +1…` | Policy hard-refuse |
+| `send 100 usdt to +1…` | Policy hard-refuse (no PIN) |
 
-`DEMO_SIMPLE=1` (default): no JOIN / SAVE / CONFIRM. Soft cap still needs funds; hard ceiling still refuses.
+Default: full onboard + PIN confirm (`DEMO_SIMPLE=0`). Voice collects PIN via **DTMF**. Unknown payee numbers get a real wallet immediately — when they later onboard, they claim that same wallet (balance already there).
 
 ## Wallets
 

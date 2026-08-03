@@ -2,38 +2,34 @@
 
 ## The demo
 
-**First call** → name → **Hey Ben, what can I do for you?**  
-**Send** → `send 0.1 usdt to <treasury>` (we control the sink; funds recycle)
-
-Spoken → faster-whisper → policy → Arc USDC.
+**Onboard** → welcome → name → Arc wallet on this number → PIN → thanks  
+**Send** → `send 0.1 usdt to +1555…` → keypad PIN → USDC to **their** phone wallet  
+**New number?** → we create their Arc wallet now; when they call in, it's already theirs  
+**Push limit** → `send 100…` → hard ceiling **refuses**
 
 ## Money loop (don’t burn the faucet)
 
 ```
-Circle faucet → operator (optional)
-            ↘
-         lab treasury EOA  ←── caller sends 0.1 USDC back here
-            ↘
-         fund caller 0.5
+faucet / treasury → fund caller
+caller --PIN--> receiver phone wallet (created if needed)
+receiver later onboard (name + PIN) → same wallet, balance waiting
 ```
 
-Treasury address is in `data/lab-wallets.json` (auto-created).
-
 ```bash
-# One-time: put CIRCLE_API_KEY in .env  OR  faucet the treasury once:
-#   https://faucet.circle.com → Arc Testnet → (address printed by npm run funds)
-
-npm run funds          # auto faucet if key set; ensure treasury funded
-npm run demo           # onboard → fund 0.5 → send 0.1 → policy refuse
+npm run funds
+npm run demo    # onboard → fund → send-to-phone → receiver onboard → refuse
 ```
 
 ## Voice
 
 ```bash
 npm run telephony && npm run start
-# dial hotline, speak
+# first call: name + keypad PIN
+# next call: "send 5 usdt to +1…" → keypad PIN
 ```
+
+`DEMO_SIMPLE=0` (default). Set `DEMO_SIMPLE=1` only for one-shot lab skips.
 
 ## Pitch
 
-Call the hotline. It remembers you. Say who to pay. Tiny Arc USDC moves under policy — recycled through a wallet we control.
+Call once to open your number. Send to any phone. Policy + PIN before money moves.

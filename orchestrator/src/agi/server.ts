@@ -1,11 +1,12 @@
 /**
  * FastAGI voice path:
- *   greet → (record name if needed) → record command → faster-whisper → pipeline → espeak TTS
+ *   onboard: welcome → name → DTMF PIN → thanks
+ *   returning: greet → command → policy → DTMF PIN confirm → TTS
  * Falls back to DTMF if STT is down.
  */
 import net from "node:net";
 import fs from "node:fs";
-import { handleCallStart, handleMessage } from "../lib/pipeline.js";
+import { handleCallStart, handleMessage, type HandleResult } from "../lib/pipeline.js";
 import {
   sharedPaths,
   sttHealthy,
@@ -56,35 +57,28 @@ async function sayVerbose(socket: net.Socket, msg: string) {
   await agiCommand(socket, `VERBOSE "${safe}" 1`);
 }
 
-/** Speak via espeak TTS into the call; always VERBOSE as backup. */
 async function speak(socket: net.Socket, msg: string, voiceOk: boolean) {
   await sayVerbose(socket, msg);
   if (!voiceOk) return;
   try {
     const { astStreamBase } = await synthesizeSpeech(msg);
-    // STREAM FILE <path-without-ext> escape_digits
     await agiCommand(socket, `STREAM FILE ${astStreamBase} "#"`);
   } catch (e) {
     console.warn("[agi] TTS failed", e);
   }
 }
 
-/** Record caller utterance → faster-whisper text. */
 async function listen(socket: net.Socket, prompt: string, voiceOk: boolean): Promise<string> {
-  await speak(socket, prompt, voiceOk);
+  if (prompt) await speak(socket, prompt, voiceOk);
   const paths = sharedPaths();
-  // RECORD FILE filename format escape timeout beep s=silence
-  // 10s max, end on #, 2s silence
   const rec = await agiCommand(
     socket,
     `RECORD FILE ${paths.astRecordBase} wav # 10000 0 s=2`,
   );
   console.log(`[agi] record ${rec} → ${paths.hostWav}`);
 
-  // Brief wait for filesystem flush from container volume
   await new Promise((r) => setTimeout(r, 300));
   if (!fs.existsSync(paths.hostWav)) {
-    // try gsm fallback
     const gsm = paths.hostWav.replace(/\.wav$/, ".gsm");
     if (fs.existsSync(gsm)) {
       console.warn("[agi] got gsm not wav — STT expects wav");
@@ -94,6 +88,112 @@ async function listen(socket: net.Socket, prompt: string, voiceOk: boolean): Pro
   const { text } = await transcribeFile(paths.hostWav);
   console.log(`[agi] heard: "${text}"`);
   return text;
+}
+
+/** Collect PIN via keypad — never ask the caller to speak it. */
+async function collectPinDigits(
+  socket: net.Socket,
+  voiceOk: boolean,
+  prompt: string | null = "Enter your PIN on the keypad, then pound.",
+): Promise<string | null> {
+  if (prompt) await speak(socket, prompt, voiceOk);
+  const res = await agiCommand(socket, "GET DATA silence/1 20000 6");
+  const digits = digitResult(res);
+  console.log(`[agi] PIN digits collected: ${digits ? `${digits.length} digits` : "none"}`);
+  if (!digits || digits === "0" || digits === "-1") return null;
+  if (!/^\d{4,6}$/.test(digits)) return null;
+  return digits;
+}
+
+/**
+ * First-call (or resume) onboard: name → wallet already on phone row → PIN → thanks.
+ * Returns true if caller is ready for commands.
+ */
+async function runOnboarding(
+  socket: net.Socket,
+  caller: string,
+  start: HandleResult,
+  voiceOk: boolean,
+  forced: string,
+): Promise<boolean> {
+  let current = start;
+  await speak(socket, current.reply, voiceOk);
+  lastAgiReply.set(caller, current.reply);
+
+  if (current.needsName) {
+    let nameText = "";
+    if (forced && !/send|pay|transfer|pin/i.test(forced)) {
+      nameText = forced;
+    } else if (voiceOk) {
+      // Welcome already asked for the name — just record
+      nameText = await listen(socket, "", voiceOk);
+    } else {
+      await speak(socket, "Text your name to the hotline SMS, then call again.", voiceOk);
+      return false;
+    }
+    if (!nameText) {
+      await speak(socket, "I didn't catch your name. Call back when you're ready.", voiceOk);
+      return false;
+    }
+    current = await handleMessage(caller, nameText);
+    await speak(socket, current.reply, voiceOk);
+    lastAgiReply.set(caller, current.reply);
+  }
+
+  if (current.needsSetPin) {
+    // Reply already asked for PIN — only collect digits
+    const pin = await collectPinDigits(socket, voiceOk, null);
+    if (!pin) {
+      await speak(socket, "Setup paused. Call back to finish your PIN.", voiceOk);
+      return false;
+    }
+    current = await handleMessage(caller, `PIN ${pin}`);
+    await speak(socket, current.reply, voiceOk);
+    lastAgiReply.set(caller, current.reply);
+  }
+
+  // Onboard complete when we no longer need name/PIN setup
+  return !current.needsName && !current.needsSetPin;
+}
+
+async function finishSpendPin(
+  socket: net.Socket,
+  caller: string,
+  result: HandleResult,
+  voiceOk: boolean,
+): Promise<HandleResult> {
+  let current = result;
+  await speak(socket, current.reply, voiceOk);
+  lastAgiReply.set(caller, current.reply);
+
+  for (let attempt = 0; attempt < 2 && current.needsPin; attempt++) {
+    const pin = await collectPinDigits(
+      socket,
+      voiceOk,
+      attempt === 0
+        ? "Enter your PIN, then pound."
+        : "Wrong PIN. Try once more, then pound.",
+    );
+    if (!pin) {
+      await handleMessage(caller, "cancel");
+      await speak(socket, "Cancelled.", voiceOk);
+      lastAgiReply.set(caller, "Cancelled.");
+      return { reply: "Cancelled." };
+    }
+    current = await handleMessage(caller, `CONFIRM ${pin}`);
+    await speak(socket, current.reply, voiceOk);
+    lastAgiReply.set(caller, current.reply);
+    if (!current.needsPin) break;
+  }
+
+  if (current.needsPin) {
+    await handleMessage(caller, "cancel");
+    await speak(socket, "Too many wrong PINs. Send cancelled.", voiceOk);
+    lastAgiReply.set(caller, "Too many wrong PINs. Send cancelled.");
+    return { reply: "Too many wrong PINs. Send cancelled." };
+  }
+
+  return current;
 }
 
 async function dtmfFallback(socket: net.Socket, caller: string, voiceOk: boolean) {
@@ -114,8 +214,12 @@ async function dtmfFallback(socket: net.Socket, caller: string, voiceOk: boolean
   const to = digits.length === 10 ? `+1${digits}` : `+${digits}`;
   const text = `send ${amount} usdt to ${to}`;
   const result = await handleMessage(caller, text);
-  await speak(socket, result.reply, voiceOk);
-  lastAgiReply.set(caller, result.reply);
+  if (result.needsPin) {
+    await finishSpendPin(socket, caller, result, voiceOk);
+  } else {
+    await speak(socket, result.reply, voiceOk);
+    lastAgiReply.set(caller, result.reply);
+  }
 }
 
 async function handleAgi(socket: net.Socket) {
@@ -133,35 +237,21 @@ async function handleAgi(socket: net.Socket) {
   const voiceOk = await sttHealthy();
   console.log(`[agi] STT ${voiceOk ? "up" : "down — DTMF fallback"}`);
 
-  // Forced text from dialplan still works: AGI(...,"send 10 usdt to +1...")
   const forced = (env["agi_arg_1"] || "").trim();
-
   const start = await handleCallStart(caller);
-  await speak(socket, start.reply, voiceOk);
-  lastAgiReply.set(caller, start.reply);
 
-  if (start.needsName) {
-    if (forced && !/send|pay|transfer/i.test(forced)) {
-      const named = await handleMessage(caller, forced);
-      await speak(socket, named.reply, voiceOk);
-      lastAgiReply.set(caller, named.reply);
-    } else if (voiceOk) {
-      const nameHeard = await listen(socket, "Please say your first name.", voiceOk);
-      if (!nameHeard) {
-        await speak(socket, "I didn't catch your name. Try again later.", voiceOk);
-        await agiCommand(socket, "HANGUP");
-        socket.end();
-        return;
-      }
-      const named = await handleMessage(caller, nameHeard);
-      await speak(socket, named.reply, voiceOk);
-      lastAgiReply.set(caller, named.reply);
-    } else {
-      await speak(socket, "Text your name to the hotline SMS, then call again.", voiceOk);
+  // First call / incomplete setup
+  if (start.needsName || start.needsSetPin || start.onboarding) {
+    const ready = await runOnboarding(socket, caller, start, voiceOk, forced);
+    if (!ready) {
       await agiCommand(socket, "HANGUP");
       socket.end();
       return;
     }
+    // Onboard done — offer one command on the same call
+  } else {
+    await speak(socket, start.reply, voiceOk);
+    lastAgiReply.set(caller, start.reply);
   }
 
   let text: string;
@@ -170,7 +260,7 @@ async function handleAgi(socket: net.Socket) {
   } else if (voiceOk) {
     text = await listen(
       socket,
-      "What can I do for you? For example, say: send 10 USDT to a phone number.",
+      "What can I do for you? For example, say: send 5 USDT to a phone number.",
       voiceOk,
     );
     if (!text) {
@@ -188,8 +278,16 @@ async function handleAgi(socket: net.Socket) {
   }
 
   const result = await handleMessage(caller, text);
-  await speak(socket, result.reply, voiceOk);
-  lastAgiReply.set(caller, result.reply);
+  if (result.needsPin) {
+    await finishSpendPin(socket, caller, result, voiceOk);
+  } else if (result.needsSetPin || result.needsName) {
+    // Rare: drifted mid-call — resume onboard
+    await runOnboarding(socket, caller, result, voiceOk, "");
+  } else {
+    await speak(socket, result.reply, voiceOk);
+    lastAgiReply.set(caller, result.reply);
+  }
+
   await agiCommand(socket, "HANGUP");
   socket.end();
 }
