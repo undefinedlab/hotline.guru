@@ -119,5 +119,7 @@ DEMO.md           pitch script
 
 ## Docs
 
+- [docs/SYSTEM_REVIEW.md](docs/SYSTEM_REVIEW.md) — what we have and how it works
 - [kb.md](kb.md) — idea, peers, marketplace, plan lock (§16)
 - [DEMO.md](DEMO.md) — 2-minute judge script
+- [docs/PITCH_DECK.md](docs/PITCH_DECK.md) — investor brief
