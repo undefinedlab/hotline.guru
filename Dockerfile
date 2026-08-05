@@ -10,15 +10,20 @@ RUN npm ci --omit=dev
 
 FROM node:22-bookworm-slim
 
+# Non-root (Red Hat / enterprise baseline)
+RUN groupadd -r hotline && useradd -r -g hotline -d /app -s /sbin/nologin hotline \
+  && mkdir -p /app/data /shared \
+  && chown -R hotline:hotline /app /shared
+
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8787
 ENV AGI_PORT=4573
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json ./
-COPY orchestrator ./orchestrator
+COPY --from=deps --chown=hotline:hotline /app/node_modules ./node_modules
+COPY --chown=hotline:hotline package.json package-lock.json ./
+COPY --chown=hotline:hotline orchestrator ./orchestrator
 
-# tsx is a dep via npm; run the same entry as npm start
+USER hotline
 EXPOSE 8787 4573
 CMD ["./node_modules/.bin/tsx", "orchestrator/src/server.ts"]

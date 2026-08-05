@@ -10,9 +10,15 @@ import { checkDb, initDb, listPolicyAudit, normalizePhone } from "./lib/db.js";
 import { checkArcRpc, resolveWalletMode } from "./lib/wallets.js";
 import { circleConfigured, circleGasStationEnabled, circleHealth } from "./lib/circle.js";
 import { sttHealthy } from "./lib/stt.js";
-import { log } from "./lib/log.js";
+import { log, safeEqualStr } from "./lib/log.js";
 import { verifyAtWebhook, verifyGenericHmac, verifyTelnyxSignature } from "./lib/webhooks.js";
-import { assertProfileConfig, channelStatus, hotlineProfile } from "./lib/profile.js";
+import {
+  assertProfileConfig,
+  channelStatus,
+  hotlineProfile,
+  labApiAuthorized,
+  labHttpApiAllowed,
+} from "./lib/profile.js";
 import { ingressRateLimit } from "./lib/rateLimit.js";
 import {
   createWhatsAppProvider,
@@ -52,7 +58,29 @@ function auditAuthorized(c: { req: { header: (n: string) => string | undefined }
     return hotlineProfile() === "lab" && process.env.WEBHOOK_VERIFY !== "1";
   }
   const auth = c.req.header("authorization") ?? "";
-  return auth === `Bearer ${expected}` || c.req.header("x-audit-token") === expected;
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  const headerTok = c.req.header("x-audit-token") ?? "";
+  return (
+    (Boolean(bearer) && safeEqualStr(bearer, expected)) ||
+    (Boolean(headerTok) && safeEqualStr(headerTok, expected))
+  );
+}
+
+function requireLabHttp(
+  c: {
+    req: { header: (n: string) => string | undefined };
+    json: (b: unknown, s?: number) => Response;
+  },
+): Response | null {
+  if (!labHttpApiAllowed()) {
+    return c.json({ error: "lab http api disabled — use verified channel webhooks" }, 403);
+  }
+  if (
+    !labApiAuthorized(c.req.header("authorization"), c.req.header("x-lab-token"))
+  ) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return null;
 }
 
 app.get("/health", async (c) => {
@@ -60,17 +88,20 @@ app.get("/health", async (c) => {
   const base = {
     ok: true,
     service: "hotline.guru",
-    profile: process.env.HOTLINE_PROFILE ?? "lab",
+    profile: hotlineProfile(),
     walletMode: resolveWalletMode(),
-    walletModeConfigured: process.env.WALLET_MODE ?? "circle",
     sms: sms.name,
     whatsapp: whatsapp.name,
     telegram: telegram.name,
     circleConfigured: circleConfigured(),
     gasStation: circleGasStationEnabled(),
-    channels: channelStatus(),
   };
   if (!deep) return c.json(base);
+
+  // Deep checks — require audit token outside open lab
+  if (process.env.AUDIT_EXPORT_TOKEN || hotlineProfile() !== "lab") {
+    if (!auditAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
+  }
 
   const mode = resolveWalletMode();
   const [db, arc, stt, circle] = await Promise.all([
@@ -84,6 +115,7 @@ app.get("/health", async (c) => {
     {
       ...base,
       ok,
+      channels: channelStatus(),
       checks: {
         db,
         arc,
@@ -125,15 +157,28 @@ app.get("/v1/audit/policy", async (c) => {
 });
 
 app.get("/v1/agi/last", (c) => {
+  if (!auditAuthorized(c) && hotlineProfile() !== "lab") {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  if (hotlineProfile() === "lab" && process.env.AUDIT_EXPORT_TOKEN && !auditAuthorized(c)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
   const phone = c.req.query("phone") ?? "";
   if (!phone) return c.json({ error: "phone query required" }, 400);
   const reply = lastAgiReply.get(phone) ?? lastAgiReply.get(normalizePhone(phone)) ?? null;
-  return c.json({ phone, reply });
+  return c.json({ phone: normalizePhone(phone), reply });
 });
 
-app.get("/v1/channels", (c) => c.json(channelStatus()));
+app.get("/v1/channels", (c) => {
+  if (hotlineProfile() !== "lab" && !auditAuthorized(c)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  return c.json(channelStatus());
+});
 
 app.post("/v1/call/start", async (c) => {
+  const denied = requireLabHttp(c);
+  if (denied) return denied;
   const body = await c.req.json<{ phone?: string }>();
   if (!body.phone) return c.json({ error: "phone required" }, 400);
   const limited = rateLimited(c, body.phone);
@@ -144,6 +189,8 @@ app.post("/v1/call/start", async (c) => {
 });
 
 app.post("/v1/message", async (c) => {
+  const denied = requireLabHttp(c);
+  if (denied) return denied;
   const body = await c.req.json<{ phone?: string; account?: string; text?: string }>();
   const who = body.account ?? body.phone;
   if (!who || body.text == null) return c.json({ error: "phone/account and text required" }, 400);
@@ -251,7 +298,8 @@ app.post("/webhooks/sms/telnyx", async (c) => {
 app.post("/webhooks/sms/at", async (c) => {
   const v = verifyAtWebhook({
     headerSecret: c.req.header("x-at-secret") ?? c.req.header("x-hotline-at-secret"),
-    querySecret: c.req.query("secret"),
+    // Query secrets only allowed in lab (leak into access logs)
+    querySecret: hotlineProfile() === "lab" ? c.req.query("secret") : undefined,
   });
   if (!v.ok) {
     log.warn("at webhook rejected", { reason: v.reason });

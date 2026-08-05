@@ -4,7 +4,7 @@
  * Live: TELEGRAM_BOT_TOKEN (+ optional TELEGRAM_WEBHOOK_SECRET).
  */
 import { accountFromTelegram } from "./channel.js";
-import { log } from "./log.js";
+import { log, safeEqualStr } from "./log.js";
 import { webhookVerifyEnabled } from "./webhooks.js";
 
 export type TelegramInbound = {
@@ -72,7 +72,7 @@ export function verifyTelegramSecret(
     if (webhookVerifyEnabled()) return { ok: false, reason: "missing X-Telegram-Bot-Api-Secret-Token" };
     return { ok: true };
   }
-  if (header !== secret) return { ok: false, reason: "bad telegram secret" };
+  if (!safeEqualStr(header, secret)) return { ok: false, reason: "bad telegram secret" };
   return { ok: true };
 }
 

@@ -1,5 +1,5 @@
 import { isAddress, type Address } from "viem";
-import { findUserByName, getContact, getUser, getUserByHotlineName, normalizePhone } from "./db.js";
+import { getContact, getUser, getUserByHotlineName, normalizePhone } from "./db.js";
 import { displayHotline, normalizeHotlineLabel } from "./hotlinens.js";
 import { ensureWallet } from "./wallets.js";
 
@@ -59,6 +59,7 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
     };
   }
 
+  // HotlineNS only — no global first-name directory (privacy)
   if (looksLikeHotline(raw)) {
     const byNs = await getUserByHotlineName(normalizeHotlineLabel(raw));
     if (byNs) {
@@ -69,18 +70,6 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
         provisioned: false,
       };
     }
-  }
-
-  const byName = await findUserByName(raw.replace(/\.hotline$/i, ""));
-  if (byName) {
-    return {
-      label: byName.hotline_name
-        ? displayHotline(byName.hotline_name)
-        : (byName.name ?? raw),
-      address: byName.wallet_address as Address,
-      phone: byName.phone,
-      provisioned: false,
-    };
   }
 
   return null;

@@ -11,7 +11,7 @@ export class MockSmsProvider implements SmsProvider {
   sent: { to: string; body: string }[] = [];
   async send(to: string, body: string) {
     this.sent.push({ to, body });
-    console.log(`[sms:mock] → ${to}: ${body}`);
+    console.log(`[sms:mock] → ${to}: ${body.replace(/\b\d{4,6}\b/g, "****").slice(0, 120)}`);
   }
 }
 

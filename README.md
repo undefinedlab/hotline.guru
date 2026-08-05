@@ -64,10 +64,12 @@ Default providers are `mock`. **Live DID/trunk** still needs accounts: copy `tel
 
 ```bash
 npm run backup                    # Postgres dump or SQLite copy → data/backups/
-HOTLINE_PROFILE=staging …         # refuses weak WALLET_SECRET / missing WEBHOOK_VERIFY / no Postgres
+HOTLINE_PROFILE=staging …         # refuses weak WALLET_SECRET / DEMO_SIMPLE / mock SIM / missing WEBHOOK_VERIFY
 ```
 
-CI: `.github/workflows/ci.yml` runs typecheck, tests, and `docker build`.
+Security defaults: FastAGI not published from compose; lab HTTP API locked outside lab (`LAB_HTTP_API` + `LAB_API_TOKEN`); PINs use scrypt; logs hash phone fields; WHOIS does not return MSISDN.
+
+CI: `.github/workflows/ci.yml` runs typecheck, tests, `npm audit`, and `docker build`.
 
 ## HTTP lab API
 

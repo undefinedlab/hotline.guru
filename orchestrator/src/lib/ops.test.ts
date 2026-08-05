@@ -97,10 +97,14 @@ describe("profile", () => {
     process.env.HOTLINE_PROFILE = "staging";
     process.env.WALLET_SECRET = "dev-only-change-me";
     process.env.WEBHOOK_VERIFY = "0";
+    process.env.DEMO_SIMPLE = "1";
+    process.env.SIM_ATTEST_MODE = "mock";
     delete process.env.AUDIT_EXPORT_TOKEN;
     delete process.env.DATABASE_URL;
     assert.throws(() => assertProfileConfig(), /refused weak config/);
     delete process.env.HOTLINE_PROFILE;
+    delete process.env.DEMO_SIMPLE;
+    delete process.env.SIM_ATTEST_MODE;
   });
 
   it("channelStatus does not leak secrets", () => {

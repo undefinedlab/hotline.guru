@@ -26,7 +26,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${PORT:-8787}:8787"
-      - "${AGI_PORT:-4573}:4573"
+      # FastAGI stays on Docker network only (asterisk → orchestrator:4573). Do not publish.
     environment:
       HOTLINE_PROFILE: ${HOTLINE_PROFILE:-lab}
       PORT: "8787"

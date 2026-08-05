@@ -1,4 +1,4 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import {
   createPublicClient,
   createWalletClient,
@@ -87,12 +87,35 @@ function decryptPk(blob: string): Hex {
 }
 
 export function hashPin(pin: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(pin, `hotline:pin:${salt}`, 32).toString("hex");
+  return `v2:${salt}:${hash}`;
+}
+
+function legacyPinHash(pin: string): string {
   return createHash("sha256").update(`hotline:${pin}`).digest("hex");
 }
 
 export function verifyPin(user: User, pin: string): boolean {
   if (!user.pin_hash) return false;
-  return user.pin_hash === hashPin(pin);
+  if (user.pin_hash.startsWith("v2:")) {
+    const parts = user.pin_hash.split(":");
+    const salt = parts[1];
+    const hash = parts[2];
+    if (!salt || !hash) return false;
+    const got = scryptSync(pin, `hotline:pin:${salt}`, 32).toString("hex");
+    try {
+      return timingSafeEqual(Buffer.from(got, "hex"), Buffer.from(hash, "hex"));
+    } catch {
+      return false;
+    }
+  }
+  const legacy = legacyPinHash(pin);
+  try {
+    return timingSafeEqual(Buffer.from(legacy, "hex"), Buffer.from(user.pin_hash, "hex"));
+  } catch {
+    return user.pin_hash === legacy;
+  }
 }
 
 export async function ensureWallet(phone: string, name?: string): Promise<User> {

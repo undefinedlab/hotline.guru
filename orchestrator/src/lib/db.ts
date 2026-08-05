@@ -760,6 +760,52 @@ export async function getIdempotentResult<T = unknown>(
   return JSON.parse(row.result_json) as T;
 }
 
+const IDEM_PENDING = '{"__idem":"pending"}';
+
+function isIdemPending(raw: unknown): boolean {
+  return (
+    typeof raw === "object" &&
+    raw != null &&
+    (raw as { __idem?: string }).__idem === "pending"
+  );
+}
+
+/**
+ * Atomic claim before money move — winner transfers; loser sees inflight or completed.
+ */
+export async function claimIdempotency<T = unknown>(
+  idKey: string,
+  phone: string,
+): Promise<
+  | { status: "claimed" }
+  | { status: "inflight" }
+  | { status: "completed"; result: T }
+> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const ins = await pool!.query(
+      `INSERT INTO idempotency (id_key, phone, result_json)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id_key) DO NOTHING
+       RETURNING id_key`,
+      [idKey, p, IDEM_PENDING],
+    );
+    if (ins.rowCount && ins.rowCount > 0) return { status: "claimed" };
+  } else {
+    const info = sqliteDb()
+      .prepare(
+        `INSERT OR IGNORE INTO idempotency (id_key, phone, result_json) VALUES (?, ?, ?)`,
+      )
+      .run(idKey, p, IDEM_PENDING);
+    if (info.changes > 0) return { status: "claimed" };
+  }
+  const existing = await getIdempotentResult<T | { __idem: string }>(idKey);
+  if (existing == null) return { status: "claimed" }; // race unlikely
+  if (isIdemPending(existing)) return { status: "inflight" };
+  return { status: "completed", result: existing as T };
+}
+
 export async function saveIdempotentResult(
   idKey: string,
   phone: string,
@@ -772,13 +818,14 @@ export async function saveIdempotentResult(
     await pool!.query(
       `INSERT INTO idempotency (id_key, phone, result_json)
        VALUES ($1, $2, $3)
-       ON CONFLICT (id_key) DO NOTHING`,
+       ON CONFLICT (id_key) DO UPDATE SET result_json = EXCLUDED.result_json, phone = EXCLUDED.phone`,
       [idKey, p, json],
     );
   } else {
     sqliteDb()
       .prepare(
-        `INSERT OR IGNORE INTO idempotency (id_key, phone, result_json) VALUES (?, ?, ?)`,
+        `INSERT INTO idempotency (id_key, phone, result_json) VALUES (?, ?, ?)
+         ON CONFLICT(id_key) DO UPDATE SET result_json = excluded.result_json, phone = excluded.phone`,
       )
       .run(idKey, p, json);
   }

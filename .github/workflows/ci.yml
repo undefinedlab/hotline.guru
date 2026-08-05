@@ -27,3 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t hotline.guru:ci .
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

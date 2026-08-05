@@ -232,7 +232,8 @@ async function handleAgi(socket: net.Socket) {
   }
   const env = parseEnv(header);
   const caller = env["agi_callerid"] || env["agi_accountcode"] || "+10000000000";
-  console.log(`[agi] call from ${caller}`);
+  // Privacy: do not log raw caller id
+  console.log(`[agi] call from ${caller.replace(/\d(?=\d{4})/g, "*")}`);
 
   const voiceOk = await sttHealthy();
   console.log(`[agi] STT ${voiceOk ? "up" : "down — DTMF fallback"}`);
@@ -301,8 +302,10 @@ export function startAgiServer(port: number) {
       socket.destroy();
     });
   });
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`hotline.guru FastAGI on :${port}`);
+  // Default: all interfaces inside Docker network. Prefer AGI_BIND=127.0.0.1 on host.
+  const host = process.env.AGI_BIND ?? "0.0.0.0";
+  server.listen(port, host, () => {
+    console.log(`hotline.guru FastAGI on ${host}:${port}`);
   });
   return server;
 }

@@ -16,6 +16,7 @@ import {
 } from "./db.js";
 import { phoneFraudLookup } from "./marketplace.js";
 import { log } from "./log.js";
+import { isStrictProfile } from "./profile.js";
 
 export type IdentityTier = 0 | 1 | 2;
 
@@ -71,7 +72,8 @@ export function limitsForTier(tier: number): TierLimits {
 
 export function hashNationalId(raw: string): string {
   const cleaned = raw.replace(/\s+/g, "").toUpperCase();
-  return createHash("sha256").update(`hotline:nid:${cleaned}`).digest("hex");
+  const pepper = process.env.NID_PEPPER ?? process.env.WALLET_SECRET ?? "hotline-nid-dev";
+  return createHash("sha256").update(`hotline:nid:${pepper}:${cleaned}`).digest("hex");
 }
 
 export function identitySummary(user: User): string {
@@ -110,13 +112,16 @@ export async function attestSim(phone: string): Promise<{
   const mode = (process.env.SIM_ATTEST_MODE ?? "mock").toLowerCase();
   const user = await getUser(phone);
   if (!user) throw new Error("User not found");
+  const isStrict = isStrictProfile();
 
-  if (mode === "off") {
+  if (mode === "off" || (isStrict && mode === "mock")) {
     return {
       user,
       mode,
       summary:
-        "SIM attest needs a telco partner. Set SIM_ATTEST_MODE=mock for lab, or live with fraud lookup.",
+        mode === "mock"
+          ? "SIM mock attest disabled outside lab. Set SIM_ATTEST_MODE=live with a telco partner."
+          : "SIM attest needs a telco partner. Set SIM_ATTEST_MODE=mock for lab, or live with fraud lookup.",
     };
   }
 

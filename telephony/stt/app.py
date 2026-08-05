@@ -97,7 +97,11 @@ async def tts(body: dict):
     text = text[:280]
     safe = re.sub(r"[^a-zA-Z0-9 .,?!'$-]", " ", text)
     fid = body.get("id") or uuid.uuid4().hex[:12]
-    out = SHARED / f"tts-{fid}.wav"
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", str(fid)):
+        raise HTTPException(400, "invalid id")
+    out = (SHARED / f"tts-{fid}.wav").resolve()
+    if not str(out).startswith(str(SHARED.resolve())):
+        raise HTTPException(400, "invalid path")
     try:
         subprocess.run(
             [
@@ -126,7 +130,9 @@ async def tts(body: dict):
 
 @app.get("/tts/{fid}.wav")
 def get_tts(fid: str):
-    path = SHARED / f"tts-{fid}.wav"
-    if not path.exists():
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", fid):
+        raise HTTPException(400, "invalid id")
+    path = (SHARED / f"tts-{fid}.wav").resolve()
+    if not str(path).startswith(str(SHARED.resolve())) or not path.exists():
         raise HTTPException(404, "not found")
     return FileResponse(path, media_type="audio/wav")

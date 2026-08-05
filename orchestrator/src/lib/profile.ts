@@ -2,7 +2,7 @@
  * Staging / prod profile guards — refuse to boot with lab secrets.
  */
 import { circleConfigured } from "./circle.js";
-import { log } from "./log.js";
+import { log, safeEqualStr } from "./log.js";
 
 export type HotlineProfile = "lab" | "staging" | "prod";
 
@@ -14,6 +14,31 @@ export function hotlineProfile(): HotlineProfile {
 
 export function isStrictProfile(): boolean {
   return hotlineProfile() !== "lab";
+}
+
+/**
+ * Lab HTTP API (/v1/message, /v1/call/start).
+ * Lab: open unless LAB_HTTP_API=0; if LAB_API_TOKEN set, require it.
+ * Staging/prod: disabled unless LAB_HTTP_API=1 and LAB_API_TOKEN set.
+ */
+export function labHttpApiAllowed(): boolean {
+  if (process.env.LAB_HTTP_API === "0") return false;
+  if (isStrictProfile()) {
+    return process.env.LAB_HTTP_API === "1" && Boolean(process.env.LAB_API_TOKEN);
+  }
+  return true;
+}
+
+export function labApiAuthorized(authHeader: string | undefined, tokenHeader: string | undefined): boolean {
+  if (!labHttpApiAllowed()) return false;
+  const expected = process.env.LAB_API_TOKEN;
+  if (!expected) {
+    // Lab without token — open (local demos). Staging never reaches here without token.
+    return !isStrictProfile();
+  }
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const got = bearer || tokenHeader || "";
+  return Boolean(got) && safeEqualStr(got, expected);
 }
 
 /** Throws if staging/prod would run with weak/missing ops config. */
@@ -33,6 +58,16 @@ export function assertProfileConfig(): void {
   }
   if (!process.env.DATABASE_URL) {
     fails.push("DATABASE_URL (Postgres required outside lab)");
+  }
+  if (process.env.DEMO_SIMPLE === "1") {
+    fails.push("DEMO_SIMPLE must be 0 outside lab");
+  }
+  const sim = (process.env.SIM_ATTEST_MODE ?? "mock").toLowerCase();
+  if (sim === "mock") {
+    fails.push("SIM_ATTEST_MODE=live|off (mock forbidden outside lab)");
+  }
+  if (process.env.LAB_HTTP_API === "1" && !process.env.LAB_API_TOKEN) {
+    fails.push("LAB_API_TOKEN required when LAB_HTTP_API=1");
   }
   const sms = process.env.SMS_PROVIDER ?? "mock";
   if (sms === "telnyx") {
@@ -65,6 +100,7 @@ export function channelStatus() {
   return {
     profile: hotlineProfile(),
     webhookVerify: process.env.WEBHOOK_VERIFY === "1",
+    labHttpApi: labHttpApiAllowed(),
     sms: {
       provider: sms,
       configured:
@@ -79,8 +115,8 @@ export function channelStatus() {
         (sms === "africas_talking" && Boolean(process.env.AT_WEBHOOK_SECRET)),
     },
     voice: {
-      didHint: process.env.INBOUND_DID ?? null,
-      trunk: process.env.SIP_TRUNK_HOST ?? null,
+      didHint: process.env.INBOUND_DID ? "[set]" : null,
+      trunk: process.env.SIP_TRUNK_HOST ? "[set]" : null,
       note: "Fill telephony/asterisk/pjsip.telnyx.conf.example when DID is provisioned",
     },
     whatsapp: {

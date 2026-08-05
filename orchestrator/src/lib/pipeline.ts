@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { isAddress, type Address } from "viem";
 import {
   addLedger,
+  claimIdempotency,
   clearPinFailures,
-  getIdempotentResult,
   getPending,
   getUser,
   isPinLocked,
@@ -230,6 +230,15 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
         onboarding: true,
       };
     }
+    // Already onboarded — require re-auth: CHANGE PIN <old> <new> via confirm flow
+    if (user.pin_hash && isOnboarded(user) && !demoSimple()) {
+      return {
+        reply: withName(
+          user,
+          "PIN already set. To change it, say CHANGE PIN then enter old PIN and new PIN on the keypad.",
+        ),
+      };
+    }
     return completePinSetup(phone, intent.pin);
   }
 
@@ -344,9 +353,9 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `${hit.label} → ${hit.displayName ?? "user"} on ${hit.phone}`,
+        `${hit.label} is registered${hit.displayName ? ` (${hit.displayName})` : ""}.`,
       ),
-      data: { whois: hit },
+      data: { whois: { label: hit.label, displayName: hit.displayName } },
     };
   }
 
@@ -512,10 +521,15 @@ async function executeSend(
     pending.idemKey ??
     `send:${phone}:${pending.toAddress}:${pending.amount.toFixed(6)}:${pending.toPhone ?? ""}`;
 
-  const cached = await getIdempotentResult<HandleResult>(idemKey);
-  if (cached) {
+  const claim = await claimIdempotency<HandleResult>(idemKey, phone);
+  if (claim.status === "completed") {
     log.info("idempotent hit", { phone, idemKey: shortHash(idemKey) });
-    return cached;
+    return claim.result;
+  }
+  if (claim.status === "inflight") {
+    return {
+      reply: withName(u, "That transfer is already in progress. Wait a moment, then check HISTORY."),
+    };
   }
 
   try {
