@@ -68,14 +68,23 @@ export class AfricasTalkingSmsProvider implements SmsProvider {
 export function createSmsProvider(): SmsProvider {
   const kind = process.env.SMS_PROVIDER ?? "mock";
   if (kind === "telnyx") {
-    return new TelnyxSmsProvider(process.env.TELNYX_API_KEY!, process.env.TELNYX_FROM!);
+    const key = process.env.TELNYX_API_KEY;
+    const from = process.env.TELNYX_FROM;
+    if (!key || !from) {
+      console.warn("[sms] TELNYX_API_KEY/FROM missing — using mock");
+      return new MockSmsProvider();
+    }
+    return new TelnyxSmsProvider(key, from);
   }
   if (kind === "africas_talking") {
-    return new AfricasTalkingSmsProvider(
-      process.env.AT_USERNAME!,
-      process.env.AT_API_KEY!,
-      process.env.AT_FROM!,
-    );
+    const username = process.env.AT_USERNAME;
+    const apiKey = process.env.AT_API_KEY;
+    const from = process.env.AT_FROM;
+    if (!username || !apiKey || !from) {
+      console.warn("[sms] AT credentials missing — using mock");
+      return new MockSmsProvider();
+    }
+    return new AfricasTalkingSmsProvider(username, apiKey, from);
   }
   return new MockSmsProvider();
 }

@@ -1,0 +1,60 @@
+; Telnyx Elastic SIP / Mission Control trunk — copy values into pjsip.conf
+; when an inbound DID is provisioned. Do NOT commit real credentials.
+;
+; Portal: https://portal.telnyx.com → Voice → SIP Connections
+; Point DID → this connection; RTP UDP 10000-10099; set external_* to public IP.
+;
+; Env mapping (document in .env, substitute before deploy):
+;   SIP_USER / SIP_PASSWORD / SIP_TRUNK_HOST=sip.telnyx.com
+;   INBOUND_DID=+1xxxxxxxxxx
+;   EXTERNAL_SIP_IP=your.public.ip
+
+[udp-transport]
+type=transport
+protocol=udp
+bind=0.0.0.0
+; external_signaling_address=EXTERNAL_SIP_IP
+; external_media_address=EXTERNAL_SIP_IP
+
+[telnyx-auth]
+type=auth
+auth_type=userpass
+username=SIP_USER
+password=SIP_PASSWORD
+
+[telnyx]
+type=registration
+transport=udp-transport
+outbound_auth=telnyx-auth
+server_uri=sip:sip.telnyx.com
+client_uri=sip:SIP_USER@sip.telnyx.com
+retry_interval=60
+expiration=300
+contact_user=SIP_USER
+
+[telnyx]
+type=aor
+contact=sip:sip.telnyx.com
+
+[telnyx]
+type=endpoint
+transport=udp-transport
+context=from-trunk
+disallow=all
+allow=ulaw
+allow=alaw
+outbound_auth=telnyx-auth
+aors=telnyx
+from_user=SIP_USER
+from_domain=sip.telnyx.com
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+
+[telnyx]
+type=identify
+endpoint=telnyx
+match=sip.telnyx.com
+match=192.76.120.10
+match=64.16.250.10

@@ -1,0 +1,143 @@
+# Hotline.guru all-in-one pack
+#   docker compose up -d --build
+#   curl localhost:8787/health?deep=1
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hotline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hotline}
+      POSTGRES_DB: ${POSTGRES_DB:-hotline}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hotline} -d ${POSTGRES_DB:-hotline}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - hotline
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-8787}:8787"
+      - "${AGI_PORT:-4573}:4573"
+    environment:
+      HOTLINE_PROFILE: ${HOTLINE_PROFILE:-lab}
+      PORT: "8787"
+      AGI_PORT: "4573"
+      DATABASE_URL: postgres://${POSTGRES_USER:-hotline}:${POSTGRES_PASSWORD:-hotline}@postgres:5432/${POSTGRES_DB:-hotline}
+      WALLET_MODE: ${WALLET_MODE:-circle}
+      WALLET_SECRET: ${WALLET_SECRET:-dev-only-change-me}
+      CIRCLE_API_KEY: ${CIRCLE_API_KEY:-}
+      CIRCLE_ENTITY_SECRET: ${CIRCLE_ENTITY_SECRET:-}
+      CIRCLE_WALLET_SET_ID: ${CIRCLE_WALLET_SET_ID:-}
+      CIRCLE_ACCOUNT_TYPE: ${CIRCLE_ACCOUNT_TYPE:-SCA}
+      CIRCLE_GAS_STATION: ${CIRCLE_GAS_STATION:-1}
+      CIRCLE_BLOCKCHAIN: ${CIRCLE_BLOCKCHAIN:-ARC-TESTNET}
+      CIRCLE_FEE_LEVEL: ${CIRCLE_FEE_LEVEL:-MEDIUM}
+      ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.network}
+      USDC_ADDRESS: ${USDC_ADDRESS:-0x3600000000000000000000000000000000000000}
+      STT_URL: http://stt:8090
+      SHARED_DIR: /shared
+      ASTERISK_SHARED: /shared
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
+      TELEGRAM_PROVIDER: ${TELEGRAM_PROVIDER:-mock}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      DEMO_SIMPLE: ${DEMO_SIMPLE:-0}
+      DEMO_PIN: ${DEMO_PIN:-1234}
+      WEBHOOK_VERIFY: ${WEBHOOK_VERIFY:-0}
+      AUDIT_EXPORT_TOKEN: ${AUDIT_EXPORT_TOKEN:-}
+    volumes:
+      - ./data:/app/data
+      - ./telephony/shared:/shared
+      - ./recovery:/app/recovery:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      stt:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - hotline
+
+  stt:
+    build: ./telephony/stt
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-tiny.en}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE: int8
+      SHARED_DIR: /shared
+    volumes:
+      - ./telephony/shared:/shared
+      - stt-models:/root/.cache
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    restart: unless-stopped
+    networks:
+      - hotline
+
+  asterisk:
+    image: andrius/asterisk:latest
+    ports:
+      - "5060:5060/udp"
+      - "10000-10099:10000-10099/udp"
+    environment:
+      PHONE_AGI_HOST: orchestrator
+    volumes:
+      - ./telephony/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./telephony/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./telephony/asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ./telephony/asterisk/sounds:/var/lib/asterisk/sounds
+      - ./telephony/shared:/shared
+    depends_on:
+      - orchestrator
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - hotline
+
+volumes:
+  pgdata:
+  stt-models:
+
+networks:
+  hotline:
+    driver: bridge

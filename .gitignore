@@ -1,5 +1,8 @@
 node_modules/
-data/
+data/*
+!data/backups/
+data/backups/*
+!data/backups/.gitkeep
 dist/
 .env
 *.db

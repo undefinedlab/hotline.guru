@@ -3,10 +3,10 @@
  *
  * Env:
  *   CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET + CIRCLE_WALLET_SET_ID
- *   CIRCLE_ACCOUNT_TYPE=EOA|SCA  (SCA enables Gas Station sponsorship on Arc testnet)
- *   CIRCLE_GAS_STATION=1         → force SCA account type
+ *   CIRCLE_ACCOUNT_TYPE=SCA|EOA  (default SCA — Gas Station on Arc testnet)
+ *   CIRCLE_GAS_STATION=1|0       (1 forces SCA; 0 forces EOA)
  *
- * Lab fallback: WALLET_MODE=local (viem EOAs on Arc RPC).
+ * Default money path is Circle. Lab/tests: WALLET_MODE=local.
  * Register entity secret once: npm run circle:register-secret
  */
 import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
@@ -25,11 +25,32 @@ export function circleConfigured(): boolean {
   );
 }
 
-/** Gas Station needs SCA wallets on Arc (testnet has a default policy). */
+let warnedMissingCircle = false;
+
+/**
+ * Resolve custody backend.
+ * Default: circle (when creds present). Explicit WALLET_MODE=local for lab EOAs.
+ * If WALLET_MODE=circle (or unset) without creds → soft-fallback to local with a warn.
+ */
+export function resolveWalletMode(): "circle" | "local" {
+  const raw = (process.env.WALLET_MODE ?? "circle").toLowerCase().trim();
+  if (raw === "local") return "local";
+  if (circleConfigured()) return "circle";
+  if (!warnedMissingCircle && (raw === "circle" || !process.env.WALLET_MODE)) {
+    warnedMissingCircle = true;
+    log.warn(
+      "Circle is the default money path but CIRCLE_* creds are missing — using local EOAs. Set CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID (or WALLET_MODE=local).",
+    );
+  }
+  return "local";
+}
+
+/** Gas Station needs SCA wallets on Arc (testnet has a default policy). Default: SCA. */
 export function circleAccountType(): "EOA" | "SCA" {
+  if (process.env.CIRCLE_GAS_STATION === "0") return "EOA";
   if (process.env.CIRCLE_GAS_STATION === "1") return "SCA";
-  const t = (process.env.CIRCLE_ACCOUNT_TYPE ?? "EOA").toUpperCase();
-  return t === "SCA" ? "SCA" : "EOA";
+  const t = (process.env.CIRCLE_ACCOUNT_TYPE ?? "SCA").toUpperCase();
+  return t === "EOA" ? "EOA" : "SCA";
 }
 
 export function circleGasStationEnabled(): boolean {

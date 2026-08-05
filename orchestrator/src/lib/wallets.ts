@@ -14,8 +14,10 @@ import { getUser, upsertUser, type User } from "./db.js";
 import {
   circleConfigured,
   circleCreateWallet,
+  circleGasStationEnabled,
   circleTransferUsdc,
   circleWalletUsdcBalance,
+  resolveWalletMode,
 } from "./circle.js";
 import {
   ARC_BLOCKCHAIN,
@@ -30,7 +32,7 @@ import {
 } from "./arc.js";
 import { log } from "./log.js";
 
-const MODE = process.env.WALLET_MODE ?? "local";
+export { resolveWalletMode } from "./circle.js";
 
 const erc20Abi = [
   {
@@ -108,7 +110,7 @@ export async function ensureWallet(phone: string, name?: string): Promise<User> 
     return existing;
   }
 
-  if (MODE === "circle") {
+  if (resolveWalletMode() === "circle") {
     if (!circleConfigured()) {
       throw new Error(
         "WALLET_MODE=circle requires CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID",
@@ -169,7 +171,7 @@ export async function transferUsdc(params: {
   const user = await getUser(params.fromPhone);
   if (!user) throw new Error("User not found");
 
-  if (MODE === "circle" || user.wallet_ref.startsWith("circle:")) {
+  if (resolveWalletMode() === "circle" || user.wallet_ref.startsWith("circle:")) {
     const walletId = user.wallet_ref.replace(/^circle:/, "");
     const { txHash } = await circleTransferUsdc({
       walletId,
@@ -206,7 +208,8 @@ export async function transferUsdc(params: {
 }
 
 export function exportDepositInfo(user: User) {
-  const gasStation = process.env.CIRCLE_GAS_STATION === "1" || process.env.CIRCLE_ACCOUNT_TYPE === "SCA";
+  const gasStation = circleGasStationEnabled() || user.wallet_ref.startsWith("circle:");
+  const mode = user.wallet_ref.startsWith("circle:") ? "circle" : resolveWalletMode();
   return {
     address: user.wallet_address,
     addressUrl: addressUrl(user.wallet_address),
@@ -215,10 +218,10 @@ export function exportDepositInfo(user: User) {
     usdc: USDC_ADDRESS,
     explorer: ARC_EXPLORER,
     faucet: ARC_FAUCET,
-    note: gasStation
+    note: gasStation && mode === "circle"
       ? "SCA wallet — Gas Station may sponsor fees on Arc testnet; still fund USDC for transfers"
       : "Request Arc Testnet USDC to this address",
-    custody: MODE,
-    gasStation,
+    custody: mode,
+    gasStation: mode === "circle" && circleGasStationEnabled(),
   };
 }
