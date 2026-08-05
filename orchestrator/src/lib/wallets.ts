@@ -7,13 +7,29 @@ import {
   formatUnits,
   type Address,
   type Hex,
+  type TransactionReceipt,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getUser, upsertUser, type User } from "./db.js";
+import {
+  circleConfigured,
+  circleCreateWallet,
+  circleTransferUsdc,
+  circleWalletUsdcBalance,
+} from "./circle.js";
+import {
+  ARC_BLOCKCHAIN,
+  ARC_CHAIN_ID,
+  ARC_EXPLORER,
+  ARC_FAUCET,
+  ARC_RPC_URL,
+  USDC_ADDRESS,
+  addressUrl,
+  arcTestnet,
+  txUrl,
+} from "./arc.js";
+import { log } from "./log.js";
 
-const ARC_RPC = process.env.ARC_RPC_URL ?? "https://rpc.testnet.arc.network";
-const USDC = (process.env.USDC_ADDRESS ??
-  "0x3600000000000000000000000000000000000000") as Address;
 const MODE = process.env.WALLET_MODE ?? "local";
 
 const erc20Abi = [
@@ -34,21 +50,18 @@ const erc20Abi = [
     ],
     outputs: [{ type: "bool" }],
   },
-  {
-    type: "function",
-    name: "decimals",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint8" }],
-  },
 ] as const;
 
 const publicClient = createPublicClient({
-  transport: http(ARC_RPC),
+  chain: arcTestnet,
+  transport: http(ARC_RPC_URL),
 });
 
 function secretKey(): Buffer {
   const secret = process.env.WALLET_SECRET ?? "dev-only-change-me";
+  if (secret === "dev-only-change-me" && process.env.HOTLINE_PROFILE === "staging") {
+    log.warn("WALLET_SECRET is still the default — set a strong secret in staging");
+  }
   return scryptSync(secret, "hotline.guru", 32);
 }
 
@@ -80,9 +93,8 @@ export function verifyPin(user: User, pin: string): boolean {
   return user.pin_hash === hashPin(pin);
 }
 
-/** Create or return existing wallet for phone. */
 export async function ensureWallet(phone: string, name?: string): Promise<User> {
-  const existing = getUser(phone);
+  const existing = await getUser(phone);
   if (existing) {
     if (name && name !== existing.name) {
       return upsertUser({
@@ -97,25 +109,37 @@ export async function ensureWallet(phone: string, name?: string): Promise<User> 
   }
 
   if (MODE === "circle") {
-    throw new Error(
-      "WALLET_MODE=circle requires Circle developer-controlled wallet provisioning (set CIRCLE_API_KEY / ENTITY_SECRET / WALLET_SET_ID). Use WALLET_MODE=local for lab.",
-    );
+    if (!circleConfigured()) {
+      throw new Error(
+        "WALLET_MODE=circle requires CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID",
+      );
+    }
+    const w = await circleCreateWallet(phone);
+    return upsertUser({
+      phone,
+      name: name ?? null,
+      wallet_address: w.address,
+      wallet_ref: `circle:${w.walletId}`,
+    });
   }
 
   const pk = `0x${randomBytes(32).toString("hex")}` as Hex;
   const account = privateKeyToAccount(pk);
-  const ref = encryptPk(pk);
   return upsertUser({
     phone,
     name: name ?? null,
     wallet_address: account.address,
-    wallet_ref: ref,
+    wallet_ref: encryptPk(pk),
   });
 }
 
-export async function getUsdcBalance(address: Address): Promise<number> {
+export async function getUsdcBalance(address: Address, walletRef?: string | null): Promise<number> {
+  if (walletRef?.startsWith("circle:") && circleConfigured()) {
+    const bal = await circleWalletUsdcBalance(walletRef.slice("circle:".length));
+    if (bal != null) return bal;
+  }
   const raw = await publicClient.readContract({
-    address: USDC,
+    address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [address],
@@ -123,49 +147,78 @@ export async function getUsdcBalance(address: Address): Promise<number> {
   return Number(formatUnits(raw, 6));
 }
 
+export async function checkArcRpc(): Promise<{ ok: boolean; block?: string; error?: string }> {
+  try {
+    const n = await publicClient.getBlockNumber();
+    return { ok: true, block: n.toString() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function waitReceipt(hash: Hex): Promise<TransactionReceipt> {
+  const timeout = Number(process.env.TX_RECEIPT_TIMEOUT_MS ?? 90_000);
+  return publicClient.waitForTransactionReceipt({ hash, timeout });
+}
+
 export async function transferUsdc(params: {
   fromPhone: string;
   toAddress: Address;
   amountUsdc: number;
-}): Promise<{ txHash: Hex }> {
-  const user = getUser(params.fromPhone);
+}): Promise<{ txHash: Hex; explorer: string }> {
+  const user = await getUser(params.fromPhone);
   if (!user) throw new Error("User not found");
 
-  if (MODE === "circle") {
-    throw new Error("Circle SDK transfer not configured — use WALLET_MODE=local or wire CIRCLE_* keys");
+  if (MODE === "circle" || user.wallet_ref.startsWith("circle:")) {
+    const walletId = user.wallet_ref.replace(/^circle:/, "");
+    const { txHash } = await circleTransferUsdc({
+      walletId,
+      walletAddress: user.wallet_address,
+      toAddress: params.toAddress,
+      amountUsdc: params.amountUsdc,
+    });
+    const hash = txHash as Hex;
+    return { txHash: hash, explorer: txUrl(hash) };
   }
 
   const pk = decryptPk(user.wallet_ref);
   const account = privateKeyToAccount(pk);
   const wallet = createWalletClient({
     account,
-    transport: http(ARC_RPC),
+    chain: arcTestnet,
+    transport: http(ARC_RPC_URL),
   });
 
   const amount = parseUnits(params.amountUsdc.toFixed(6), 6);
   const hash = await wallet.writeContract({
-    chain: {
-      id: Number(process.env.ARC_CHAIN_ID ?? 5042002),
-      name: "Arc Testnet",
-      nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-      rpcUrls: { default: { http: [ARC_RPC] } },
-    },
-    address: USDC,
+    address: USDC_ADDRESS,
     abi: erc20Abi,
     functionName: "transfer",
     args: [params.toAddress, amount],
   });
 
-  return { txHash: hash };
+  const receipt = await waitReceipt(hash);
+  if (receipt.status !== "success") {
+    throw new Error(`Arc transfer reverted (${hash})`);
+  }
+  log.info("local arc transfer mined", { txHash: hash, block: receipt.blockNumber.toString() });
+  return { txHash: hash, explorer: txUrl(hash) };
 }
 
 export function exportDepositInfo(user: User) {
+  const gasStation = process.env.CIRCLE_GAS_STATION === "1" || process.env.CIRCLE_ACCOUNT_TYPE === "SCA";
   return {
     address: user.wallet_address,
-    chain: "ARC-TESTNET",
-    chainId: 5042002,
-    usdc: USDC,
-    faucet: "https://faucet.circle.com",
-    note: "Request Arc Testnet USDC to this address",
+    addressUrl: addressUrl(user.wallet_address),
+    chain: ARC_BLOCKCHAIN,
+    chainId: ARC_CHAIN_ID,
+    usdc: USDC_ADDRESS,
+    explorer: ARC_EXPLORER,
+    faucet: ARC_FAUCET,
+    note: gasStation
+      ? "SCA wallet — Gas Station may sponsor fees on Arc testnet; still fund USDC for transfers"
+      : "Request Arc Testnet USDC to this address",
+    custody: MODE,
+    gasStation,
   };
 }

@@ -11,13 +11,13 @@ const DAILY = Number(process.env.POLICY_DAILY_CAP ?? 50);
 const NANOPAY_DAILY = Number(process.env.POLICY_NANOPAY_DAILY ?? 1);
 
 /** Deterministic gate — LLM never authorizes money. */
-export function evaluatePolicy(phone: string, intent: Intent): PolicyVerdict {
+export async function evaluatePolicy(phone: string, intent: Intent): Promise<PolicyVerdict> {
   if (intent.action === "price") {
-    const spent = sumLedgerToday(phone, "nanopay");
+    const spent = await sumLedgerToday(phone, "nanopay");
     if (spent + 0.01 > NANOPAY_DAILY) {
       return { status: "reject", reason: `Nanopay daily cap $${NANOPAY_DAILY} reached` };
     }
-    return { status: "pass" }; // auto nanopay under budget
+    return { status: "pass" };
   }
 
   if (intent.action !== "send") {
@@ -41,7 +41,7 @@ export function evaluatePolicy(phone: string, intent: Intent): PolicyVerdict {
     };
   }
 
-  const sentToday = sumLedgerToday(phone, "send");
+  const sentToday = await sumLedgerToday(phone, "send");
   if (sentToday + amount > DAILY) {
     return {
       status: "reject",
@@ -49,7 +49,6 @@ export function evaluatePolicy(phone: string, intent: Intent): PolicyVerdict {
     };
   }
 
-  // Always confirm money moves with PIN when user has a PIN set — handled in pipeline
   return { status: "confirm", reason: "Confirm send with your PIN" };
 }
 

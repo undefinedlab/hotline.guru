@@ -1,15 +1,22 @@
+import { randomUUID } from "node:crypto";
 import { isAddress, type Address } from "viem";
 import {
   addLedger,
+  clearPinFailures,
+  getIdempotentResult,
   getPending,
   getUser,
+  isPinLocked,
   listContacts,
   listLedger,
+  normalizePhone,
+  recordPinFailure,
+  recordPolicyDecision,
   saveContact,
+  saveIdempotentResult,
   setPending,
   setPin,
   setUserName,
-  normalizePhone,
   type User,
 } from "./db.js";
 import { resolvePayee } from "./contacts.js";
@@ -25,10 +32,10 @@ import {
   transferUsdc,
   verifyPin,
 } from "./wallets.js";
+import { log, shortHash } from "./log.js";
 
 const sms = createSmsProvider();
 
-/** Opt-in one-shot demo. Default is real PIN confirm + full onboard. */
 function demoSimple(): boolean {
   return process.env.DEMO_SIMPLE === "1";
 }
@@ -37,15 +44,20 @@ function demoPin(): string {
   return process.env.DEMO_PIN ?? "1234";
 }
 
+function pinMaxFails(): number {
+  return Number(process.env.PIN_MAX_FAILS ?? 5);
+}
+
+function pinLockMinutes(): number {
+  return Number(process.env.PIN_LOCK_MINUTES ?? 15);
+}
+
 export type HandleResult = {
   reply: string;
   data?: Record<string, unknown>;
   needsName?: boolean;
-  /** Pending send — collect PIN (prefer DTMF) then CONFIRM. */
   needsPin?: boolean;
-  /** Onboard or resume — collect digits then PIN ####. */
   needsSetPin?: boolean;
-  /** True while first-call onboard is still running. */
   onboarding?: boolean;
 };
 
@@ -56,6 +68,7 @@ type PendingSend = {
   toAddress: Address;
   toPhone?: string;
   provisioned?: boolean;
+  idemKey?: string;
 };
 
 type PendingName = { type: "awaiting_name" };
@@ -70,7 +83,6 @@ function withName(user: User | null | undefined, body: string): string {
   return n ? `Hey ${n} — ${body}` : body;
 }
 
-/** Name + PIN (wallet is created at first touch). Demo-simple auto-fills PIN. */
 function isOnboarded(user: User): boolean {
   if (!user.name) return false;
   if (demoSimple()) return true;
@@ -83,10 +95,6 @@ export async function handleMessage(phoneRaw: string, text: string): Promise<Han
   return dispatch(phone, intent, text);
 }
 
-/**
- * Pickup: create Arc wallet for this number if needed, then
- * welcome → name → PIN, or greet a fully onboarded caller.
- */
 export async function handleCallStart(phoneRaw: string): Promise<HandleResult> {
   const phone = normalizePhone(phoneRaw);
   const user = await ensureCaller(phone);
@@ -94,21 +102,20 @@ export async function handleCallStart(phoneRaw: string): Promise<HandleResult> {
 }
 
 async function ensureCaller(phone: string) {
-  let user = getUser(phone);
+  let user = await getUser(phone);
   if (!user) {
-    // Creates Arc wallet + phone row (receiver funds already land here if pre-provisioned)
     user = await ensureWallet(phone);
   }
   if (demoSimple() && !user.pin_hash) {
-    setPin(phone, hashPin(demoPin()));
-    user = getUser(phone)!;
+    await setPin(phone, hashPin(demoPin()));
+    user = (await getUser(phone))!;
   }
   return user;
 }
 
 async function continueOnboardOrGreet(phone: string, user: User): Promise<HandleResult> {
   if (!user.name) {
-    setPending(phone, { type: "awaiting_name" } satisfies PendingName);
+    await setPending(phone, { type: "awaiting_name" } satisfies PendingName);
     return {
       reply:
         "Welcome to hotline.guru. We'll set up your account on this number. What's your first name?",
@@ -127,7 +134,7 @@ async function continueOnboardOrGreet(phone: string, user: User): Promise<Handle
     };
   }
 
-  setPending(phone, null);
+  await setPending(phone, null);
   return {
     reply: `Hey ${firstName(user)}, what can I do for you?`,
     data: { name: user.name, address: user.wallet_address },
@@ -136,19 +143,19 @@ async function continueOnboardOrGreet(phone: string, user: User): Promise<Handle
 
 async function finishNaming(phone: string, rawName: string): Promise<HandleResult> {
   await ensureCaller(phone);
-  const user = setUserName(phone, rawName);
+  const user = await setUserName(phone, rawName);
   const dep = exportDepositInfo(user);
 
   if (demoSimple()) {
-    if (!user.pin_hash) setPin(phone, hashPin(demoPin()));
-    setPending(phone, null);
+    if (!user.pin_hash) await setPin(phone, hashPin(demoPin()));
+    await setPending(phone, null);
     return {
       reply: `Nice to meet you, ${firstName(user)}. You're set. What can I do for you?`,
       data: { name: user.name, address: dep.address },
     };
   }
 
-  setPending(phone, null);
+  await setPending(phone, null);
   return {
     reply: `Nice to meet you, ${firstName(user)}. Your Arc wallet is ready. Choose a 4-digit PIN on the keypad, then pound.`,
     needsSetPin: true,
@@ -158,11 +165,11 @@ async function finishNaming(phone: string, rawName: string): Promise<HandleResul
 }
 
 async function completePinSetup(phone: string, pin: string): Promise<HandleResult> {
-  const user = await ensureCaller(phone);
-  setPin(phone, hashPin(pin));
-  const fresh = getUser(phone)!;
+  await ensureCaller(phone);
+  await setPin(phone, hashPin(pin));
+  const fresh = (await getUser(phone))!;
   const dep = exportDepositInfo(fresh);
-  setPending(phone, null);
+  await setPending(phone, null);
 
   const reply = fresh.name
     ? `Thanks, ${firstName(fresh)}. You're all set on this number. Call anytime to send USDC to another phone number.`
@@ -183,7 +190,7 @@ async function completePinSetup(phone: string, pin: string): Promise<HandleResul
 }
 
 async function dispatch(phone: string, intent: Intent, raw: string): Promise<HandleResult> {
-  const awaiting = getPending<PendingName | PendingSend>(phone);
+  const awaiting = await getPending<PendingName | PendingSend>(phone);
 
   if (awaiting?.type === "awaiting_name") {
     if (intent.action === "set_name") return finishNaming(phone, intent.name);
@@ -209,7 +216,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "set_pin") {
     const user = await ensureCaller(phone);
     if (!user.name && !demoSimple()) {
-      setPending(phone, { type: "awaiting_name" });
+      await setPending(phone, { type: "awaiting_name" });
       return {
         reply: "First tell me your name, then we'll set your PIN.",
         needsName: true,
@@ -220,7 +227,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "cancel") {
-    const pending = getPending<PendingName | PendingSend>(phone);
+    const pending = await getPending<PendingName | PendingSend>(phone);
     if (pending && "type" in pending && pending.type === "awaiting_name") {
       return {
         reply: "Still need your name to finish setup. What's your first name?",
@@ -228,18 +235,26 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
         onboarding: true,
       };
     }
-    setPending(phone, null);
-    return { reply: withName(getUser(phone), "Cancelled.") };
+    await setPending(phone, null);
+    return { reply: withName(await getUser(phone), "Cancelled.") };
   }
 
   if (intent.action === "confirm") {
-    const pending = getPending<PendingSend>(phone);
+    const pending = await getPending<PendingSend>(phone);
     if (!pending || pending.type !== "send") {
       return { reply: "Nothing pending to confirm." };
     }
     const user = await ensureCaller(phone);
     if (!isOnboarded(user)) {
       return continueOnboardOrGreet(phone, user);
+    }
+    if (isPinLocked(user)) {
+      return {
+        reply: withName(
+          user,
+          `PIN locked after too many tries. Try again after ${user.pin_locked_until}.`,
+        ),
+      };
     }
     const pin = intent.pin ?? (demoSimple() ? demoPin() : undefined);
     if (!pin) {
@@ -249,8 +264,21 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       };
     }
     if (!verifyPin(user, pin)) {
+      const updated = await recordPinFailure(phone, pinMaxFails(), pinLockMinutes());
+      log.warn("pin failure", {
+        phone,
+        fails: updated.pin_fail_count,
+        locked: isPinLocked(updated),
+      });
+      if (isPinLocked(updated)) {
+        await setPending(phone, null);
+        return {
+          reply: withName(updated, "Too many wrong PINs. Send cancelled. PIN locked for a while."),
+        };
+      }
       return { reply: "Wrong PIN. Try again.", needsPin: true };
     }
+    await clearPinFailures(phone);
     return executeSend(phone, pending, user);
   }
 
@@ -266,17 +294,13 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       if (fraudNote) named.reply = `${named.reply}${fraudNote}`;
       return named;
     }
-    const fresh = getUser(phone)!;
+    const fresh = (await getUser(phone))!;
     return continueOnboardOrGreet(phone, fresh);
   }
 
   let user = await ensureCaller(phone);
 
-  // Gate everything else behind onboard (name + PIN)
   if (!isOnboarded(user)) {
-    if (intent.action === "help" || intent.action === "unknown") {
-      return continueOnboardOrGreet(phone, user);
-    }
     return continueOnboardOrGreet(phone, user);
   }
 
@@ -292,7 +316,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "balance") {
-    const bal = await getUsdcBalance(user.wallet_address as Address);
+    const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
     return { reply: withName(user, `Balance: ${bal.toFixed(2)} USDC on Arc.`) };
   }
 
@@ -305,7 +329,10 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "contacts") {
-    const rows = listContacts(phone) as { contact_name: string; contact_address: string | null }[];
+    const rows = (await listContacts(phone)) as {
+      contact_name: string;
+      contact_address: string | null;
+    }[];
     if (!rows.length) return { reply: withName(user, "No contacts yet.") };
     return {
       reply: withName(
@@ -316,7 +343,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "history") {
-    const rows = listLedger(phone, 5);
+    const rows = await listLedger(phone, 5);
     if (!rows.length) return { reply: withName(user, "No transactions yet.") };
     return {
       reply: withName(
@@ -335,9 +362,9 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "save") {
     const target = intent.target;
     if (isAddress(target)) {
-      saveContact(phone, intent.name, { contactAddress: target });
+      await saveContact(phone, intent.name, { contactAddress: target });
     } else if (target.startsWith("+") || /^\d+$/.test(target)) {
-      saveContact(phone, intent.name, { contactPhone: normalizePhone(target) });
+      await saveContact(phone, intent.name, { contactPhone: normalizePhone(target) });
     } else {
       return { reply: "SAVE needs an address (0x…) or phone." };
     }
@@ -345,14 +372,30 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "price") {
-    const verdict = evaluatePolicy(phone, intent);
+    const verdict = await evaluatePolicy(phone, intent);
+    await recordPolicyDecision({
+      phone,
+      action: "price",
+      verdict: verdict.status,
+      reason: "reason" in verdict ? verdict.reason : undefined,
+      intent,
+    });
     if (verdict.status === "reject") return { reply: withName(user, `Rejected: ${verdict.reason}`) };
     const price = await fetchCryptoPrice(intent.symbol, phone);
     return { reply: withName(user, price.summary), data: { mode: price.mode } };
   }
 
   if (intent.action === "send") {
-    const verdict = evaluatePolicy(phone, intent);
+    const verdict = await evaluatePolicy(phone, intent);
+    await recordPolicyDecision({
+      phone,
+      action: "send",
+      verdict: verdict.status,
+      reason: "reason" in verdict ? verdict.reason : undefined,
+      amount_usdc: intent.amount,
+      payee: intent.to,
+      intent,
+    });
     if (verdict.status === "reject") {
       return { reply: withName(user, `No — ${verdict.reason}`) };
     }
@@ -373,13 +416,15 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       toAddress: payee.address,
       toPhone: payee.phone,
       provisioned: payee.provisioned,
+      // Stable for confirm retries; unique per send intent
+      idemKey: `send:${phone}:${randomUUID()}`,
     };
 
     if (demoSimple()) {
       return executeSend(phone, pendingSend, user);
     }
 
-    setPending(phone, pendingSend);
+    await setPending(phone, pendingSend);
     const provisionHint = payee.provisioned
       ? " We'll open their hotline wallet now — it's theirs when they call in."
       : "";
@@ -394,6 +439,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
         to: payee.label,
         toPhone: payee.phone,
         provisioned: payee.provisioned,
+        idemKey: pendingSend.idemKey,
       },
     };
   }
@@ -406,14 +452,24 @@ async function executeSend(
   pending: PendingSend,
   user?: User | null,
 ): Promise<HandleResult> {
-  const u = user ?? getUser(phone);
+  const u = user ?? (await getUser(phone));
+  const idemKey =
+    pending.idemKey ??
+    `send:${phone}:${pending.toAddress}:${pending.amount.toFixed(6)}:${pending.toPhone ?? ""}`;
+
+  const cached = await getIdempotentResult<HandleResult>(idemKey);
+  if (cached) {
+    log.info("idempotent hit", { phone, idemKey: shortHash(idemKey) });
+    return cached;
+  }
+
   try {
-    const { txHash } = await transferUsdc({
+    const { txHash, explorer } = await transferUsdc({
       fromPhone: phone,
       toAddress: pending.toAddress,
       amountUsdc: pending.amount,
     });
-    addLedger({
+    await addLedger({
       phone,
       kind: "send",
       amount_usdc: pending.amount,
@@ -421,7 +477,7 @@ async function executeSend(
       tx_hash: txHash,
     });
     if (pending.toPhone) {
-      addLedger({
+      await addLedger({
         phone: pending.toPhone,
         kind: "receive",
         amount_usdc: pending.amount,
@@ -429,22 +485,30 @@ async function executeSend(
         tx_hash: txHash,
       });
     }
-    setPending(phone, null);
+    await setPending(phone, null);
 
-    const where =
-      pending.toPhone != null
-        ? pending.toPhone
-        : pending.toLabel.startsWith("+")
-          ? pending.toLabel
-          : pending.toLabel;
+    const where = pending.toPhone ?? pending.toLabel;
     const provisionNote = pending.provisioned
       ? " Their wallet is ready whenever they call the hotline."
       : "";
     const reply = withName(
       u,
-      `Sent ${pending.amount} USDC to ${where}.${provisionNote} Tx ${txHash.slice(0, 12)}…`,
+      `Sent ${pending.amount} USDC to ${where}.${provisionNote} Tx ${txHash.slice(0, 12)}… ${explorer}`,
     );
-    void sms.send(phone, reply).catch((err) => console.warn("[sms] receipt failed", err));
+    const result: HandleResult = {
+      reply,
+      data: {
+        txHash,
+        explorer,
+        to: where,
+        toAddress: pending.toAddress,
+        provisioned: pending.provisioned ?? false,
+        idemKey,
+      },
+    };
+    await saveIdempotentResult(idemKey, phone, result);
+
+    void sms.send(phone, reply).catch((err) => log.warn("sms receipt failed", { err: String(err) }));
     if (pending.toPhone) {
       void sms
         .send(
@@ -453,20 +517,15 @@ async function executeSend(
         )
         .catch(() => {});
     }
-    return {
-      reply,
-      data: {
-        txHash,
-        to: where,
-        toAddress: pending.toAddress,
-        provisioned: pending.provisioned ?? false,
-      },
-    };
+    log.info("send ok", { phone, to: where, amount: pending.amount, txHash, explorer });
+    return result;
   } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    log.error("send failed", { phone, err });
     return {
       reply: withName(
         u,
-        `Couldn't send: ${e instanceof Error ? e.message : String(e)}. Fund first (faucet or fund-user.sh).`,
+        `Couldn't send: ${err}. Fund first (faucet or fund-user.sh).`,
       ),
     };
   }

@@ -67,9 +67,14 @@ Default: full onboard + PIN confirm (`DEMO_SIMPLE=0`). Voice collects PIN via **
 
 ## Wallets
 
-- `WALLET_MODE=local` (default): encrypted EOAs on Arc via viem — works for Encode demos.
-- `WALLET_MODE=circle`: wire Circle developer-controlled wallets (`CIRCLE_API_KEY`, etc.).
-- Operator Circle **agent** wallet (CLI session) funds demos / optional `MARKETPLACE_LIVE=1` x402 pays.
+- `WALLET_MODE=local` (default): encrypted EOAs on Arc via viem — Encode lab demos.
+- `WALLET_MODE=circle`: Circle **developer-controlled wallets** on `ARC-TESTNET`
+  - One-time: `npm run circle:register-secret` (needs `CIRCLE_API_KEY`)
+  - Then set `CIRCLE_WALLET_SET_ID`; smoke with `npm run circle:smoke`
+  - `CIRCLE_GAS_STATION=1` → SCA wallets (Gas Station sponsors fees on Arc testnet)
+- Policy audit export: `GET /v1/audit/policy` (JSON or `?format=csv`); set `AUDIT_EXPORT_TOKEN` in staging
+- Transfers wait for confirmation and return ArcScan links
+- Operator Circle **agent** wallet (CLI) still funds demos / optional `MARKETPLACE_LIVE=1` x402
 
 ## Layout
 

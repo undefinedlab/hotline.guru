@@ -23,21 +23,21 @@ describe("parseIntent", () => {
 });
 
 describe("policy", () => {
-  it("hard-rejects over ceiling", () => {
+  it("hard-rejects over ceiling", async () => {
     const limits = policyLimits();
-    const v = evaluatePolicy("+15550009999", {
+    const v = await evaluatePolicy("+15550009999", {
       action: "send",
       amount: limits.hardCeiling + 1,
       to: "bob",
     });
     assert.equal(v.status, "reject");
   });
-  it("asks confirm under soft path", () => {
-    const v = evaluatePolicy("+15550009999", { action: "send", amount: 1, to: "bob" });
+  it("asks confirm under soft path", async () => {
+    const v = await evaluatePolicy("+15550009999", { action: "send", amount: 1, to: "bob" });
     assert.equal(v.status, "confirm");
   });
-  it("passes price nanopay under budget", () => {
-    const v = evaluatePolicy("+15550008888", { action: "price", symbol: "bitcoin" });
+  it("passes price nanopay under budget", async () => {
+    const v = await evaluatePolicy("+15550008888", { action: "price", symbol: "bitcoin" });
     assert.equal(v.status, "pass");
   });
 });

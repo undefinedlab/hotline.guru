@@ -3,6 +3,7 @@ data/
 dist/
 .env
 *.db
+recovery/
 telephony/asterisk/sounds/*
 !telephony/asterisk/sounds/.gitkeep
 telephony/asterisk/phone_recordings/

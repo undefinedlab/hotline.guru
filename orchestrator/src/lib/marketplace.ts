@@ -40,7 +40,7 @@ export async function fetchCryptoPrice(symbol: string, phone: string): Promise<M
         { timeout: 60_000, maxBuffer: 2_000_000 },
       );
       const parsed = JSON.parse(stdout);
-      addLedger({
+      await addLedger({
         phone,
         kind: "nanopay:price",
         amount_usdc: 0.008,
@@ -63,7 +63,7 @@ export async function fetchCryptoPrice(symbol: string, phone: string): Promise<M
     const free = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd`;
     const res = await fetch(free);
     const data = (await res.json()) as Record<string, { usd?: number }>;
-    addLedger({
+    await addLedger({
       phone,
       kind: "nanopay:price",
       amount_usdc: 0,

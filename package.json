@@ -7,25 +7,30 @@
     "dev": "tsx watch orchestrator/src/server.ts",
     "start": "tsx orchestrator/src/server.ts",
     "cli": "tsx orchestrator/src/cli/hotline.ts",
-    "test": "tsx --test orchestrator/src/lib/*.test.ts",
+    "test": "tsx --test orchestrator/src/lib/intent.test.ts orchestrator/src/lib/policy.test.ts orchestrator/src/lib/pipeline.test.ts orchestrator/src/lib/stt.test.ts",
     "demo": "bash scripts/demo-flow.sh",
     "fund": "bash scripts/fund-user.sh",
     "funds": "bash scripts/ensure-funds.sh",
     "stt:smoke": "bash scripts/smoke-stt.sh",
+    "circle:smoke": "tsx orchestrator/src/cli/circle-smoke.ts",
+    "circle:register-secret": "tsx orchestrator/src/cli/circle-register-secret.ts",
     "telephony": "docker compose -f telephony/docker-compose.yml up -d --build",
     "agi": "tsx orchestrator/src/agi/server.ts",
     "typecheck": "tsc -p orchestrator/tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@circle-fin/developer-controlled-wallets": "^8.3.0",
     "@hono/node-server": "^1.14.1",
     "better-sqlite3": "^11.9.1",
     "hono": "^4.7.5",
+    "pg": "^8.14.1",
     "viem": "^2.28.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.14.0",
+    "@types/pg": "^8.11.11",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
   }
