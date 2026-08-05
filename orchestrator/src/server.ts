@@ -12,14 +12,27 @@ import { circleConfigured, circleGasStationEnabled, circleHealth } from "./lib/c
 import { sttHealthy } from "./lib/stt.js";
 import { log } from "./lib/log.js";
 import { verifyGenericHmac, verifyTelnyxSignature } from "./lib/webhooks.js";
+import {
+  createWhatsAppProvider,
+  parseWhatsAppWebhook,
+  verifyWhatsAppSignature,
+  whatsappVerifyChallenge,
+} from "./lib/whatsapp.js";
+import {
+  createTelegramProvider,
+  parseTelegramUpdate,
+  verifyTelegramSecret,
+} from "./lib/telegram.js";
+import { handleInboundTelegram, handleInboundWhatsApp } from "./lib/ingress.js";
 
 const app = new Hono();
 const sms = createSmsProvider();
+const whatsapp = createWhatsAppProvider();
+const telegram = createTelegramProvider();
 
 function auditAuthorized(c: { req: { header: (n: string) => string | undefined } }): boolean {
   const expected = process.env.AUDIT_EXPORT_TOKEN;
   if (!expected) {
-    // Lab: open export. Staging/prod: require bearer token.
     return (process.env.HOTLINE_PROFILE ?? "lab") !== "staging" && process.env.WEBHOOK_VERIFY !== "1";
   }
   const auth = c.req.header("authorization") ?? "";
@@ -34,6 +47,8 @@ app.get("/health", async (c) => {
     profile: process.env.HOTLINE_PROFILE ?? "lab",
     walletMode: process.env.WALLET_MODE ?? "local",
     sms: sms.name,
+    whatsapp: whatsapp.name,
+    telegram: telegram.name,
     circleConfigured: circleConfigured(),
     gasStation: circleGasStationEnabled(),
   };
@@ -61,7 +76,6 @@ app.get("/health", async (c) => {
   );
 });
 
-/** Compliance export — policy gate decisions (ALLOW/REFUSE/confirm). */
 app.get("/v1/audit/policy", async (c) => {
   if (!auditAuthorized(c)) return c.json({ error: "unauthorized" }, 401);
   const phone = c.req.query("phone") ?? undefined;
@@ -107,10 +121,78 @@ app.post("/v1/call/start", async (c) => {
 });
 
 app.post("/v1/message", async (c) => {
-  const body = await c.req.json<{ phone?: string; text?: string }>();
-  if (!body.phone || body.text == null) return c.json({ error: "phone and text required" }, 400);
-  const result = await handleMessage(body.phone, body.text || "hi");
+  const body = await c.req.json<{ phone?: string; account?: string; text?: string }>();
+  const who = body.account ?? body.phone;
+  if (!who || body.text == null) return c.json({ error: "phone/account and text required" }, 400);
+  const result = await handleMessage(who, body.text || "hi");
   return c.json(result);
+});
+
+app.get("/webhooks/whatsapp", (c) => {
+  const challenge = whatsappVerifyChallenge({
+    "hub.mode": c.req.query("hub.mode") ?? undefined,
+    "hub.verify_token": c.req.query("hub.verify_token") ?? undefined,
+    "hub.challenge": c.req.query("hub.challenge") ?? undefined,
+  });
+  if (challenge == null) return c.text("Forbidden", 403);
+  return c.text(challenge);
+});
+
+app.post("/webhooks/whatsapp", async (c) => {
+  const raw = await c.req.text();
+  const v = verifyWhatsAppSignature(raw, c.req.header("x-hub-signature-256"));
+  if (!v.ok) {
+    log.warn("whatsapp webhook rejected", { reason: v.reason });
+    return c.json({ error: v.reason }, 401);
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return c.json({ error: "bad json" }, 400);
+  }
+  const messages = parseWhatsAppWebhook(payload);
+  const replies: string[] = [];
+  for (const m of messages) {
+    try {
+      const result = await handleInboundWhatsApp(m.account, m.text, m.fromWaId, whatsapp);
+      replies.push(result.reply);
+      log.info("whatsapp inbound", { account: m.account, messageId: m.messageId });
+    } catch (e) {
+      log.warn("whatsapp handle failed", { err: String(e), account: m.account });
+    }
+  }
+  return c.json({ ok: true, handled: messages.length, replies });
+});
+
+app.post("/webhooks/telegram", async (c) => {
+  const raw = await c.req.text();
+  const v = verifyTelegramSecret(c.req.header("x-telegram-bot-api-secret-token"));
+  if (!v.ok) {
+    log.warn("telegram webhook rejected", { reason: v.reason });
+    return c.json({ error: v.reason }, 401);
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return c.json({ error: "bad json" }, 400);
+  }
+  const inbound = parseTelegramUpdate(payload);
+  if (!inbound) return c.json({ ok: true, handled: 0 });
+  try {
+    const result = await handleInboundTelegram(
+      inbound.account,
+      inbound.text,
+      inbound.chatId,
+      telegram,
+    );
+    log.info("telegram inbound", { account: inbound.account, username: inbound.username });
+    return c.json({ ok: true, handled: 1, reply: result.reply });
+  } catch (e) {
+    log.warn("telegram handle failed", { err: String(e), account: inbound.account });
+    return c.json({ ok: false, error: String(e) }, 500);
+  }
 });
 
 app.post("/webhooks/sms/telnyx", async (c) => {
@@ -123,9 +205,12 @@ app.post("/webhooks/sms/telnyx", async (c) => {
     log.warn("telnyx webhook rejected", { reason: v.reason });
     return c.json({ error: v.reason }, 401);
   }
-  const payload = JSON.parse(raw) as any;
-  const from =
-    payload?.data?.payload?.from?.phone_number ?? payload?.from ?? "";
+  const payload = JSON.parse(raw) as {
+    data?: { payload?: { from?: { phone_number?: string }; text?: string } };
+    from?: string;
+    text?: string;
+  };
+  const from = payload?.data?.payload?.from?.phone_number ?? payload?.from ?? "";
   const text = payload?.data?.payload?.text ?? payload?.text ?? "";
   if (!from || !text) return c.json({ error: "bad payload" }, 400);
   const result = await handleInboundSms(from, text, sms);
@@ -166,7 +251,7 @@ log.info("db ready", {
 });
 
 serve({ fetch: app.fetch, port }, () => {
-  log.info("http listening", { port });
+  log.info("http listening", { port, whatsapp: whatsapp.name, telegram: telegram.name });
 });
 
 startAgiServer(agiPort);

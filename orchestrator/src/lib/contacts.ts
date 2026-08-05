@@ -1,5 +1,6 @@
 import { isAddress, type Address } from "viem";
-import { findUserByName, getContact, getUser, normalizePhone } from "./db.js";
+import { findUserByName, getContact, getUser, getUserByHotlineName, normalizePhone } from "./db.js";
+import { displayHotline, normalizeHotlineLabel } from "./hotlinens.js";
 import { ensureWallet } from "./wallets.js";
 
 export type ResolvedPayee = {
@@ -12,6 +13,12 @@ export type ResolvedPayee = {
 function looksLikePhone(raw: string): boolean {
   const d = raw.replace(/\D/g, "");
   return raw.startsWith("+") || (d.length >= 7 && d.length <= 15 && !raw.startsWith("0x"));
+}
+
+function looksLikeHotline(raw: string): boolean {
+  if (/\.hotline$/i.test(raw)) return true;
+  const n = normalizeHotlineLabel(raw);
+  return n.length >= 2 && /^[a-z][a-z0-9-]*$/.test(n) && !looksLikePhone(raw);
 }
 
 export async function resolvePayee(fromPhone: string, to: string): Promise<ResolvedPayee | null> {
@@ -52,10 +59,24 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
     };
   }
 
+  if (looksLikeHotline(raw)) {
+    const byNs = await getUserByHotlineName(normalizeHotlineLabel(raw));
+    if (byNs) {
+      return {
+        label: displayHotline(byNs.hotline_name ?? raw),
+        address: byNs.wallet_address as Address,
+        phone: byNs.phone,
+        provisioned: false,
+      };
+    }
+  }
+
   const byName = await findUserByName(raw.replace(/\.hotline$/i, ""));
   if (byName) {
     return {
-      label: byName.name ?? raw,
+      label: byName.hotline_name
+        ? displayHotline(byName.hotline_name)
+        : (byName.name ?? raw),
       address: byName.wallet_address as Address,
       phone: byName.phone,
       provisioned: false,

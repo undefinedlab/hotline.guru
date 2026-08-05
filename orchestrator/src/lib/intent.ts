@@ -13,9 +13,14 @@ export type Intent =
   | { action: "cancel" }
   | { action: "set_pin"; pin: string }
   | { action: "history" }
+  | { action: "claim_name"; name: string }
+  | { action: "whois"; name: string }
+  | { action: "verify_id"; nationalId: string }
+  | { action: "attest_sim" }
+  | { action: "identity" }
   | { action: "unknown"; raw: string };
 
-/** "send 10 usdt to +1555…" / "pay 5 dollars to this number 555…" */
+/** "send 10 usdt to +1555…" / "pay 5 dollars to this number 555…" / "send 2 to alice.hotline" */
 const SEND_RE =
   /(?:send|transfer|pay)\s+(\d+(?:\.\d+)?)\s*(?:usdt|usdc|usd|dollars?|bucks?)?\s+(?:to\s+)?(?:this\s+number\s+)?([+\d][\d\s().-]{6,}|[+\w.@-]+)/i;
 const JOIN_RE = /(?:join|register|signup|sign up)(?:\s+(\w+))?/i;
@@ -25,6 +30,11 @@ const PRICE_RE =
 const SAVE_RE = /save\s+(\w+)\s+([+\d\w.]+)/i;
 const PIN_RE = /(?:pin|set pin)\s*[:=]?\s*(\d{4,6})/i;
 const CONFIRM_RE = /^(confirm|yes|y|ok|okay)\b(?:\s+(\d{4,6}))?/i;
+const CLAIM_RE = /^(?:claim|name)\s+([a-z][a-z0-9-]{1,31})(?:\.hotline)?\s*$/i;
+const WHOIS_RE = /^(?:whois|lookup|resolve)\s+([a-z][a-z0-9.-]{1,40})\s*$/i;
+const VERIFY_RE = /^(?:verify(?:\s+id)?|id)\s+([A-Za-z0-9-]{4,32})\s*$/i;
+const ATTEST_RE = /^(?:attest(?:\s+sim)?|sim\s+attest)\b/i;
+const IDENTITY_RE = /^(?:identity|tier|limits)\b/i;
 
 function cleanPayee(raw: string): string {
   const t = raw.trim();
@@ -46,7 +56,9 @@ export function parseNameAnswer(text: string): string | null {
   if (named) return named[1];
   if (
     /^[a-z][a-z'-]{1,30}$/i.test(t) &&
-    !/^(yes|no|ok|okay|cancel|help|balance|deposit|history|hi|hey|hello|start)$/i.test(t)
+    !/^(yes|no|ok|okay|cancel|help|balance|deposit|history|hi|hey|hello|start|identity|attest)$/i.test(
+      t,
+    )
   ) {
     return t;
   }
@@ -74,6 +86,18 @@ export function parseIntent(text: string): Intent {
   if (/^deposit\b/i.test(t) || /wallet address/i.test(t)) return { action: "deposit" };
   if (/^contacts\b/i.test(t)) return { action: "contacts" };
   if (/^(history|ledger|txs?|transactions)\b/i.test(t)) return { action: "history" };
+
+  if (ATTEST_RE.test(t)) return { action: "attest_sim" };
+  if (IDENTITY_RE.test(t)) return { action: "identity" };
+
+  const claim = t.match(CLAIM_RE);
+  if (claim) return { action: "claim_name", name: claim[1].toLowerCase() };
+
+  const whois = t.match(WHOIS_RE);
+  if (whois) return { action: "whois", name: whois[1].toLowerCase() };
+
+  const verify = t.match(VERIFY_RE);
+  if (verify) return { action: "verify_id", nationalId: verify[1] };
 
   const join = t.match(JOIN_RE);
   if (join) return { action: "join", name: join[1]?.toLowerCase() };

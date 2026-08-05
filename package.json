@@ -7,7 +7,7 @@
     "dev": "tsx watch orchestrator/src/server.ts",
     "start": "tsx orchestrator/src/server.ts",
     "cli": "tsx orchestrator/src/cli/hotline.ts",
-    "test": "tsx --test orchestrator/src/lib/intent.test.ts orchestrator/src/lib/policy.test.ts orchestrator/src/lib/pipeline.test.ts orchestrator/src/lib/stt.test.ts",
+    "test": "tsx --test orchestrator/src/lib/intent.test.ts orchestrator/src/lib/policy.test.ts orchestrator/src/lib/pipeline.test.ts orchestrator/src/lib/stt.test.ts orchestrator/src/lib/identity.test.ts orchestrator/src/lib/ingress.test.ts",
     "demo": "bash scripts/demo-flow.sh",
     "fund": "bash scripts/fund-user.sh",
     "funds": "bash scripts/ensure-funds.sh",

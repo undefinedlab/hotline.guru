@@ -20,10 +20,13 @@ import {
   type User,
 } from "./db.js";
 import { resolvePayee } from "./contacts.js";
+import { claimName, lookupName, suggestHotlineName } from "./hotlinens.js";
+import { attestSim, identitySummary, verifyNationalId } from "./identity.js";
 import { parseIntentSmart, parseNameAnswer, type Intent } from "./intent.js";
 import { evaluatePolicy, policyLimits } from "./policy.js";
 import { fetchCryptoPrice, phoneFraudLookup } from "./marketplace.js";
 import { createSmsProvider } from "./sms.js";
+import { canReceiveSms } from "./channel.js";
 import {
   ensureWallet,
   exportDepositInfo,
@@ -145,22 +148,24 @@ async function finishNaming(phone: string, rawName: string): Promise<HandleResul
   await ensureCaller(phone);
   const user = await setUserName(phone, rawName);
   const dep = exportDepositInfo(user);
+  const suggest = await suggestHotlineName(user.name ?? rawName);
+  const nsHint = suggest ? ` Claim ${suggest}.hotline anytime with CLAIM ${suggest}.` : "";
 
   if (demoSimple()) {
     if (!user.pin_hash) await setPin(phone, hashPin(demoPin()));
     await setPending(phone, null);
     return {
-      reply: `Nice to meet you, ${firstName(user)}. You're set. What can I do for you?`,
-      data: { name: user.name, address: dep.address },
+      reply: `Nice to meet you, ${firstName(user)}. You're set.${nsHint} What can I do for you?`,
+      data: { name: user.name, address: dep.address, suggestHotline: suggest },
     };
   }
 
   await setPending(phone, null);
   return {
-    reply: `Nice to meet you, ${firstName(user)}. Your Arc wallet is ready. Choose a 4-digit PIN on the keypad, then pound.`,
+    reply: `Nice to meet you, ${firstName(user)}. Your Arc wallet is ready.${nsHint} Choose a 4-digit PIN on the keypad, then pound.`,
     needsSetPin: true,
     onboarding: true,
-    data: { name: user.name, address: dep.address, onboard: true },
+    data: { name: user.name, address: dep.address, onboard: true, suggestHotline: suggest },
   };
 }
 
@@ -175,12 +180,14 @@ async function completePinSetup(phone: string, pin: string): Promise<HandleResul
     ? `Thanks, ${firstName(fresh)}. You're all set on this number. Call anytime to send USDC to another phone number.`
     : "PIN set. You're ready.";
 
-  void sms
-    .send(
-      phone,
-      `hotline.guru: hi ${firstName(fresh) ?? "there"}. Deposit Arc USDC to ${dep.address}`,
-    )
-    .catch(() => {});
+  void (canReceiveSms(phone)
+    ? sms
+        .send(
+          phone,
+          `hotline.guru: hi ${firstName(fresh) ?? "there"}. Deposit Arc USDC to ${dep.address}`,
+        )
+        .catch(() => {})
+    : undefined);
 
   return {
     reply,
@@ -305,13 +312,61 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "help" || intent.action === "unknown") {
-    const limits = policyLimits();
-    const tip = `Say: send 10 usdt to +15551234567. Soft $${limits.perTx}, hard $${limits.hardCeiling}.`;
+    const limits = policyLimits(user.identity_tier ?? 0);
+    const tip = `Say: send 2 to alice.hotline or a phone. Tier ${limits.tier} soft $${limits.perTx}, hard $${limits.hardCeiling}. CLAIM name · VERIFY ID · ATTEST · IDENTITY.`;
     return {
       reply: withName(
         user,
         intent.action === "unknown" ? `I didn't catch that. ${tip}` : tip,
       ),
+    };
+  }
+
+  if (intent.action === "identity") {
+    return { reply: withName(user, identitySummary(user)) };
+  }
+
+  if (intent.action === "claim_name") {
+    try {
+      const { label } = await claimName(phone, intent.name);
+      return {
+        reply: withName(user, `You're ${label}. People can send to that name — no hex.`),
+        data: { hotline: label },
+      };
+    } catch (e) {
+      return { reply: withName(user, String(e instanceof Error ? e.message : e)) };
+    }
+  }
+
+  if (intent.action === "whois") {
+    const hit = await lookupName(intent.name);
+    if (!hit) return { reply: withName(user, `${intent.name} is not registered.`) };
+    return {
+      reply: withName(
+        user,
+        `${hit.label} → ${hit.displayName ?? "user"} on ${hit.phone}`,
+      ),
+      data: { whois: hit },
+    };
+  }
+
+  if (intent.action === "verify_id") {
+    try {
+      const updated = await verifyNationalId(phone, intent.nationalId);
+      return {
+        reply: withName(user, `ID recorded (hashed). ${identitySummary(updated)}`),
+        data: { tier: updated.identity_tier },
+      };
+    } catch (e) {
+      return { reply: withName(user, String(e instanceof Error ? e.message : e)) };
+    }
+  }
+
+  if (intent.action === "attest_sim") {
+    const result = await attestSim(phone);
+    return {
+      reply: withName(user, result.summary),
+      data: { tier: result.user.identity_tier, mode: result.mode },
     };
   }
 
@@ -508,8 +563,10 @@ async function executeSend(
     };
     await saveIdempotentResult(idemKey, phone, result);
 
-    void sms.send(phone, reply).catch((err) => log.warn("sms receipt failed", { err: String(err) }));
-    if (pending.toPhone) {
+    if (canReceiveSms(phone)) {
+      void sms.send(phone, reply).catch((err) => log.warn("sms receipt failed", { err: String(err) }));
+    }
+    if (pending.toPhone && canReceiveSms(pending.toPhone)) {
       void sms
         .send(
           pending.toPhone,

@@ -7,6 +7,8 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import pg from "pg";
 
+export type SimAttestStatus = "none" | "pending" | "attested" | "failed";
+
 export type User = {
   phone: string;
   name: string | null;
@@ -15,6 +17,12 @@ export type User = {
   wallet_ref: string;
   pin_fail_count: number;
   pin_locked_until: string | null;
+  identity_tier: number;
+  national_id_hash: string | null;
+  sim_attest_status: SimAttestStatus;
+  sim_attest_provider: string | null;
+  sim_attest_at: string | null;
+  hotline_name: string | null;
   created_at: string;
 };
 
@@ -86,16 +94,29 @@ CREATE TABLE IF NOT EXISTS policy_audit (
   intent_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS hotline_names (
+  name TEXT PRIMARY KEY,
+  phone TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
-  // Soft migrations for older DBs
+  ensureUserColumnsSqlite(db);
+}
+
+function ensureUserColumnsSqlite(db: Database.Database) {
   const cols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
   const names = new Set(cols.map((c) => c.name));
-  if (!names.has("pin_fail_count")) {
-    db.exec("ALTER TABLE users ADD COLUMN pin_fail_count INTEGER NOT NULL DEFAULT 0");
-  }
-  if (!names.has("pin_locked_until")) {
-    db.exec("ALTER TABLE users ADD COLUMN pin_locked_until TEXT");
-  }
+  const add = (col: string, ddl: string) => {
+    if (!names.has(col)) db.exec(`ALTER TABLE users ADD COLUMN ${ddl}`);
+  };
+  add("pin_fail_count", "pin_fail_count INTEGER NOT NULL DEFAULT 0");
+  add("pin_locked_until", "pin_locked_until TEXT");
+  add("identity_tier", "identity_tier INTEGER NOT NULL DEFAULT 0");
+  add("national_id_hash", "national_id_hash TEXT");
+  add("sim_attest_status", "sim_attest_status TEXT NOT NULL DEFAULT 'none'");
+  add("sim_attest_provider", "sim_attest_provider TEXT");
+  add("sim_attest_at", "sim_attest_at TEXT");
+  add("hotline_name", "hotline_name TEXT");
 }
 
 async function migratePostgres(client: pg.Pool) {
@@ -151,6 +172,19 @@ CREATE TABLE IF NOT EXISTS policy_audit (
 );
 CREATE INDEX IF NOT EXISTS ledger_phone_created ON ledger (phone, created_at DESC);
 CREATE INDEX IF NOT EXISTS policy_audit_phone_created ON policy_audit (phone, created_at DESC);
+CREATE TABLE IF NOT EXISTS hotline_names (
+  name TEXT PRIMARY KEY,
+  phone TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`);
+  await client.query(`
+ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_tier INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS national_id_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_provider TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS hotline_name TEXT;
 `);
 }
 
@@ -183,7 +217,17 @@ export async function checkDb(): Promise<{ ok: boolean; driver: string; error?: 
 }
 
 export function normalizePhone(phone: string): string {
-  const digits = phone.replace(/[^\d+]/g, "");
+  const raw = phone.trim();
+  // Telegram / explicit channel accounts — do not coerce to +E.164
+  if (/^tg:/i.test(raw)) {
+    const id = raw.replace(/^tg:/i, "").replace(/[^\d-]/g, "");
+    return `tg:${id}`;
+  }
+  if (/^(telegram):/i.test(raw)) {
+    const id = raw.replace(/^(telegram):/i, "").replace(/[^\d-]/g, "");
+    return `tg:${id}`;
+  }
+  const digits = raw.replace(/[^\d+]/g, "");
   if (digits.startsWith("+")) return digits;
   if (digits.length === 10) return `+1${digits}`;
   return digits.startsWith("00") ? `+${digits.slice(2)}` : `+${digits}`;
@@ -191,6 +235,7 @@ export function normalizePhone(phone: string): string {
 
 function mapUser(row: Record<string, unknown> | undefined): User | undefined {
   if (!row) return undefined;
+  const sim = String(row.sim_attest_status ?? "none") as SimAttestStatus;
   return {
     phone: String(row.phone),
     name: (row.name as string) ?? null,
@@ -199,6 +244,12 @@ function mapUser(row: Record<string, unknown> | undefined): User | undefined {
     wallet_ref: String(row.wallet_ref),
     pin_fail_count: Number(row.pin_fail_count ?? 0),
     pin_locked_until: row.pin_locked_until ? String(row.pin_locked_until) : null,
+    identity_tier: Number(row.identity_tier ?? 0),
+    national_id_hash: (row.national_id_hash as string) ?? null,
+    sim_attest_status: ["none", "pending", "attested", "failed"].includes(sim) ? sim : "none",
+    sim_attest_provider: (row.sim_attest_provider as string) ?? null,
+    sim_attest_at: row.sim_attest_at ? String(row.sim_attest_at) : null,
+    hotline_name: (row.hotline_name as string) ?? null,
     created_at: String(row.created_at),
   };
 }
@@ -499,6 +550,124 @@ export async function setUserName(phone: string, name: string): Promise<User> {
     await pool!.query(`UPDATE users SET name = $1 WHERE phone = $2`, [pretty, p]);
   } else {
     sqliteDb().prepare("UPDATE users SET name = ? WHERE phone = ?").run(pretty, p);
+  }
+  return (await getUser(p))!;
+}
+
+export async function setIdentityFields(
+  phone: string,
+  fields: {
+    identity_tier?: number;
+    national_id_hash?: string | null;
+    sim_attest_status?: SimAttestStatus;
+    sim_attest_provider?: string | null;
+    sim_attest_at?: string | null;
+    hotline_name?: string | null;
+  },
+): Promise<User> {
+  await initDb();
+  const p = normalizePhone(phone);
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  const push = (col: string, val: unknown) => {
+    if (usingPostgres) {
+      vals.push(val);
+      sets.push(`${col} = $${vals.length}`);
+    } else {
+      sets.push(`${col} = ?`);
+      vals.push(val);
+    }
+  };
+  if (fields.identity_tier !== undefined) push("identity_tier", fields.identity_tier);
+  if (fields.national_id_hash !== undefined) push("national_id_hash", fields.national_id_hash);
+  if (fields.sim_attest_status !== undefined) push("sim_attest_status", fields.sim_attest_status);
+  if (fields.sim_attest_provider !== undefined)
+    push("sim_attest_provider", fields.sim_attest_provider);
+  if (fields.sim_attest_at !== undefined) push("sim_attest_at", fields.sim_attest_at);
+  if (fields.hotline_name !== undefined) push("hotline_name", fields.hotline_name);
+  if (!sets.length) return (await getUser(p))!;
+  if (usingPostgres) {
+    vals.push(p);
+    await pool!.query(`UPDATE users SET ${sets.join(", ")} WHERE phone = $${vals.length}`, vals);
+  } else {
+    vals.push(p);
+    sqliteDb().prepare(`UPDATE users SET ${sets.join(", ")} WHERE phone = ?`).run(...vals);
+  }
+  return (await getUser(p))!;
+}
+
+export type HotlineNameRow = { name: string; phone: string; created_at: string };
+
+export async function getHotlineName(name: string): Promise<HotlineNameRow | undefined> {
+  await initDb();
+  const n = name.trim().toLowerCase();
+  if (usingPostgres) {
+    const r = await pool!.query(`SELECT * FROM hotline_names WHERE name = $1`, [n]);
+    const row = r.rows[0];
+    if (!row) return undefined;
+    return { name: String(row.name), phone: String(row.phone), created_at: String(row.created_at) };
+  }
+  const row = sqliteDb().prepare("SELECT * FROM hotline_names WHERE name = ?").get(n) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return undefined;
+  return { name: String(row.name), phone: String(row.phone), created_at: String(row.created_at) };
+}
+
+export async function getUserByHotlineName(name: string): Promise<User | undefined> {
+  const row = await getHotlineName(name);
+  if (!row) return undefined;
+  return getUser(row.phone);
+}
+
+/** Claim or re-claim a HotlineNS label for this phone. */
+export async function claimHotlineName(phone: string, name: string): Promise<User> {
+  await initDb();
+  const p = normalizePhone(phone);
+  const n = name.trim().toLowerCase();
+  const user = await getUser(p);
+  if (!user) throw new Error("User not found");
+
+  const existing = await getHotlineName(n);
+  if (existing && existing.phone !== p) {
+    throw new Error("name taken");
+  }
+
+  if (usingPostgres) {
+    const client = await pool!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM hotline_names WHERE phone = $1`, [p]);
+      await client.query(`INSERT INTO hotline_names (name, phone) VALUES ($1, $2)`, [n, p]);
+      await client.query(`UPDATE users SET hotline_name = $1 WHERE phone = $2`, [n, p]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } else {
+    const db = sqliteDb();
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM hotline_names WHERE phone = ?").run(p);
+      db.prepare("INSERT INTO hotline_names (name, phone) VALUES (?, ?)").run(n, p);
+      db.prepare("UPDATE users SET hotline_name = ? WHERE phone = ?").run(n, p);
+    });
+    tx();
+  }
+  return (await getUser(p))!;
+}
+
+export async function releaseHotlineName(phone: string): Promise<User> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(`DELETE FROM hotline_names WHERE phone = $1`, [p]);
+    await pool!.query(`UPDATE users SET hotline_name = NULL WHERE phone = $1`, [p]);
+  } else {
+    sqliteDb().prepare("DELETE FROM hotline_names WHERE phone = ?").run(p);
+    sqliteDb().prepare("UPDATE users SET hotline_name = NULL WHERE phone = ?").run(p);
   }
   return (await getUser(p))!;
 }

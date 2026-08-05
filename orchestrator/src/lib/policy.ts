@@ -1,4 +1,5 @@
-import { sumLedgerToday } from "./db.js";
+import { getUser, sumLedgerToday } from "./db.js";
+import { limitsForTier } from "./identity.js";
 import type { Intent } from "./intent.js";
 
 export type PolicyVerdict =
@@ -6,16 +7,15 @@ export type PolicyVerdict =
   | { status: "confirm"; reason: string }
   | { status: "reject"; reason: string };
 
-const PER_TX = Number(process.env.POLICY_PER_TX_CAP ?? 10);
-const DAILY = Number(process.env.POLICY_DAILY_CAP ?? 50);
-const NANOPAY_DAILY = Number(process.env.POLICY_NANOPAY_DAILY ?? 1);
-
-/** Deterministic gate — LLM never authorizes money. */
+/** Deterministic gate — LLM never authorizes money. Caps follow identity tier. */
 export async function evaluatePolicy(phone: string, intent: Intent): Promise<PolicyVerdict> {
+  const user = await getUser(phone);
+  const lim = limitsForTier(user?.identity_tier ?? 0);
+
   if (intent.action === "price") {
     const spent = await sumLedgerToday(phone, "nanopay");
-    if (spent + 0.01 > NANOPAY_DAILY) {
-      return { status: "reject", reason: `Nanopay daily cap $${NANOPAY_DAILY} reached` };
+    if (spent + 0.01 > lim.nanopayDaily) {
+      return { status: "reject", reason: `Nanopay daily cap $${lim.nanopayDaily} reached` };
     }
     return { status: "pass" };
   }
@@ -28,30 +28,38 @@ export async function evaluatePolicy(phone: string, intent: Intent): Promise<Pol
   if (!(amount > 0) || Number.isNaN(amount)) {
     return { status: "reject", reason: "Invalid amount" };
   }
-  if (amount > PER_TX * 5) {
+  if (amount > lim.hardCeiling) {
     return {
       status: "reject",
-      reason: `Hard ceiling: max $${PER_TX * 5} per transfer (refused even with PIN)`,
+      reason: `Hard ceiling: max $${lim.hardCeiling} per transfer at tier ${lim.tier} (${lim.label})`,
     };
   }
-  if (amount > PER_TX) {
+  if (amount > lim.perTx) {
     return {
       status: "confirm",
-      reason: `Over soft per-tx cap $${PER_TX} — confirm with PIN`,
+      reason: `Over soft per-tx cap $${lim.perTx} (tier ${lim.tier}) — confirm with PIN`,
     };
   }
 
   const sentToday = await sumLedgerToday(phone, "send");
-  if (sentToday + amount > DAILY) {
+  if (sentToday + amount > lim.daily) {
     return {
       status: "reject",
-      reason: `Daily send cap $${DAILY} would be exceeded (spent $${sentToday.toFixed(2)} today)`,
+      reason: `Daily send cap $${lim.daily} would be exceeded (spent $${sentToday.toFixed(2)} today)`,
     };
   }
 
   return { status: "confirm", reason: "Confirm send with your PIN" };
 }
 
-export function policyLimits() {
-  return { perTx: PER_TX, daily: DAILY, nanopayDaily: NANOPAY_DAILY, hardCeiling: PER_TX * 5 };
+export function policyLimits(tier = 0) {
+  const lim = limitsForTier(tier);
+  return {
+    perTx: lim.perTx,
+    daily: lim.daily,
+    nanopayDaily: lim.nanopayDaily,
+    hardCeiling: lim.hardCeiling,
+    tier: lim.tier,
+    label: lim.label,
+  };
 }
