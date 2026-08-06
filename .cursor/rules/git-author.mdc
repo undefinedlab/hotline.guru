@@ -1,0 +1,12 @@
+---
+description: Git author identity and no co-authors on commits
+alwaysApply: true
+---
+
+# Git authorship
+
+- Commits must be authored as **undefinedlab** (match existing repo author email from `git log`, typically `undefinedlab` / GitHub noreply or the account email already used on this repo).
+- **Never** add `Co-authored-by:` trailers or any co-author attribution (Cursor, Copilot, or other agents).
+- If the environment auto-appends a Cursor co-author trailer, strip it before finishing (rewrite HEAD with `git commit-tree` / equivalent). Do not leave that trailer on the commit.
+- Do not rewrite commit messages to credit AI tools.
+- Prefer `git commit --author="undefinedlab <email>"` when the local git user is not already undefinedlab; do not change global `git config`.

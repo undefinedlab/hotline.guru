@@ -1,7 +1,8 @@
 # Functionality audit — hotline.guru
 
-**Date:** 2026-08-05  
-**Scope:** Code + unit tests (`52` pass) vs investor/demo claims.  
+**Date:** 2026-08-06  
+**Scope:** Code + unit tests (`52` pass, `0` fail) vs investor/demo claims.  
+**Handover:** See [HANDOVER.md](./HANDOVER.md) for full feature inventory + test suite breakdown.  
 **Verdict:** Strong **lab / Arc testnet** product spine. Several “shipped” items are stubs or need ops. Cash-in/out and mainnet are not built.
 
 Legend:

@@ -115,6 +115,8 @@ PIN lockout after repeated failures (`PIN_MAX_FAILS`). Recovery: `RECOVER PIN` â
 orchestrator/     HTTP + FastAGI + CLI + policy/intent/wallets
 telephony/        Asterisk + STT (also pulled into root compose)
 docker-compose.yml  all-in-one pack
+docs/HANDOVER.md          features, test results, engineer handover
+docs/FUNCTIONALITY_AUDIT.md
 docs/SYSTEM_REVIEW.md
 scripts/smoke-rails.sh
 kb.md             product knowledge base
