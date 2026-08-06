@@ -86,17 +86,18 @@ Voice / SMS ingress → Intent + policy gate → Circle / Arc wallets → x402 m
 
 ### Slide 4 — How it works (actionable flow)
 
-**Headline:** Sixty seconds to settled.  
+**Headline:** Sixty seconds to a policy-gated settle.  
 
 | Step | Title | Copy |
 |------|--------|------|
 | 01 | Dial | Your number is the account. Login is a ringtone. |
 | 02 | Speak | “Send five dollars to Bob.” Names resolve — not hex. |
 | 03 | Policy | Soft caps, daily limits, hard ceilings. Over-limit = refuse. |
-| 04 | Settle + buy | USDC on Arc. Or nanopay an x402 service for answers. |
+| 04 | Settle | USDC on Arc (testnet proven; mainnet pending prod Circle creds). Or nanopay x402. |
 
 **Punch line:** P2P is table stakes. Buying the world is the product.  
 **CTA on slide:** “Book a live demo” / “Run the 60s path”
+**Diligence line (footer):** Settlement path proven on Arc testnet · mainnet pending Circle production credentials
 
 ---
 
@@ -126,10 +127,12 @@ Voice / SMS ingress → Intent + policy gate → Circle / Arc wallets → x402 m
 **Roadmap:**
 | When | Focus |
 |------|--------|
-| **Now** | Voice + SMS · Arc USDC · policy · x402 nanopay · live demo path |
-| **Next** | HotlineNS · Circle Agent Wallets · DTMF PIN · maker-checker |
-| **Scale** | WhatsApp · USSD · MCP tools · sell hotline as an x402 API |
+| **Now** | Voice + SMS · Arc **testnet** USDC · spoken policy · pending-claim · flash balance · dial-a-rate · x402 B2A stub · HotlineNS |
+| **Next** | One mainnet transfer · SIM-change from telco · outbound callback on live trunk · corridor escrow P2P with licensed partner |
+| **Scale** | WhatsApp · USSD · sell hotline as production x402 · standing worker in compose |
 | **Horizon** | Mesh · World ID · TEE → merchant card |
+
+**Sequencing note:** Cash-in/out (escrow swap) is the business unlock — after mainnet proof + PIN/SIM safety. Airtime-out is spend, not liquidity; do not prioritize early.
 
 ---
 

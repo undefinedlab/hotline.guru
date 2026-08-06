@@ -1,5 +1,16 @@
 import { motion, useReducedMotion } from 'motion/react'
-import { ArrowRight } from 'lucide-react'
+import {
+  Phone,
+  Shield,
+  Mic,
+  ShoppingBag,
+  Radio,
+  Lock,
+  Repeat,
+  Bot,
+  ArrowRight,
+  type LucideIcon,
+} from 'lucide-react'
 import { EASE, stagger, fadeUp, viewport } from '../motion'
 import { LogoG } from './LogoG'
 import { MediaFrame, VIDEOS } from './MediaFrame'
@@ -37,6 +48,64 @@ function SectionHead({
     </motion.div>
   )
 }
+
+const MODULES: {
+  i: string
+  title: string
+  meta: string
+}[] = [
+  { i: '01', title: 'Ingress', meta: 'Voice · SMS · WhatsApp · Telegram' },
+  { i: '02', title: 'Orchestrator', meta: 'Intent · HotlineNS · spoken policy' },
+  { i: '03', title: 'Custody', meta: 'Circle DCW · Arc USDC · pending claims' },
+  { i: '04', title: 'Marketplace', meta: 'x402 · StablePhone · Shop · research' },
+]
+
+const FEATURES: {
+  icon: LucideIcon
+  title: string
+  body: string
+}[] = [
+  {
+    icon: Phone,
+    title: 'Phone is the account',
+    body: 'Onboard by calling. No app store. Feature-phone ready.',
+  },
+  {
+    icon: Shield,
+    title: 'Spoken policy',
+    body: '“Never send more than ten to someone new.” Compiles, you confirm, code freezes it.',
+  },
+  {
+    icon: Mic,
+    title: 'Voice memo on send',
+    body: 'Remittance is a relationship — attach a short note that rides with the payment.',
+  },
+  {
+    icon: Radio,
+    title: 'Flash for balance',
+    body: 'Missed-call / flash the hotline — balance by SMS. Zero cost to the user.',
+  },
+  {
+    icon: Repeat,
+    title: 'Standing orders',
+    body: '“Send fifty to mom every month.” School fees and rent on a schedule.',
+  },
+  {
+    icon: Lock,
+    title: 'Savings lock',
+    body: 'Lock dollars until a date — inflation hedge without a bank product.',
+  },
+  {
+    icon: Bot,
+    title: 'Agent x402 last mile',
+    body: 'Other agents pay to call, ask, deliver USDC, or buy marketplace APIs through guru.',
+  },
+  {
+    icon: ShoppingBag,
+    title: 'Shop online',
+    body: 'SHOP tee → BUY 1 → cart link. Human approves payment. Shop.app skill for the wide catalog.',
+  },
+]
 
 export function Sections() {
   const reduce = useReducedMotion()
@@ -114,12 +183,7 @@ export function Sections() {
                 whileInView="show"
                 viewport={viewport}
               >
-                {[
-                  { i: '01', title: 'Ingress', meta: 'Voice · SMS · Asterisk · Telnyx' },
-                  { i: '02', title: 'Orchestrator', meta: 'Intent · contacts · policy' },
-                  { i: '03', title: 'Custody', meta: 'Circle · Arc USDC' },
-                  { i: '04', title: 'Marketplace', meta: 'x402 nanopay' },
-                ].map((row) => (
+                {MODULES.map((row) => (
                   <motion.div key={row.i} className="stack__row" variants={fadeUp}>
                     <span className="stack__idx">{row.i}</span>
                     <strong>{row.title}</strong>
@@ -137,7 +201,7 @@ export function Sections() {
           <SectionHead
             eyebrow="How it works"
             title="Sixty seconds from ringtone to receipt."
-            lede="Your number is the account. Names resolve — not hex. Soft caps confirm. Hard ceilings refuse."
+            lede="Your number is the account. Names resolve — not hex. Soft caps confirm. Hard ceilings refuse. Settlement proven on Arc testnet."
           />
 
           <div className="split-media">
@@ -152,22 +216,22 @@ export function Sections() {
                 {
                   n: '01',
                   title: 'Dial',
-                  body: 'Call or text guru. Phone binds to an Arc wallet.',
+                  body: 'Call or text guru. Name + PIN open the number.',
                 },
                 {
                   n: '02',
                   title: 'Speak',
-                  body: '“Send five to Bob.” Contacts and numbers resolve.',
+                  body: '“Send five to Bob.” Phones and .hotline names resolve.',
                 },
                 {
                   n: '03',
                   title: 'Policy',
-                  body: 'Limits and ceilings. Code authorizes — or refuses.',
+                  body: 'Your frozen rules + hard ceilings. Code authorizes — or refuses.',
                 },
                 {
                   n: '04',
                   title: 'Settle',
-                  body: 'USDC on Arc. Or nanopay an x402 API for an answer.',
+                  body: 'USDC on Arc — or nanopay x402 / shop a cart you still approve.',
                 },
               ].map((step) => (
                 <motion.article key={step.n} className="flow__step" variants={fadeUp}>
@@ -182,12 +246,43 @@ export function Sections() {
         </div>
       </section>
 
-      <section id="demo" className="section section--soft">
+      <section id="features" className="section section--soft">
+        <div className="shell">
+          <SectionHead
+            eyebrow="Features"
+            title="Built for corridors that flash, remittance, and agents."
+            lede="Not a dashboard of toggles — the things people actually say on a call, plus the agent surface that reaches them."
+          />
+
+          <motion.div
+            className="features"
+            variants={stagger}
+            initial="hidden"
+            whileInView="show"
+            viewport={viewport}
+          >
+            {FEATURES.map((f) => {
+              const Icon = f.icon
+              return (
+                <motion.article key={f.title} className="feature" variants={fadeUp}>
+                  <div className="feature__icon" aria-hidden>
+                    <Icon size={18} strokeWidth={1.75} />
+                  </div>
+                  <h3 className="feature__title">{f.title}</h3>
+                  <p className="feature__body">{f.body}</p>
+                </motion.article>
+              )
+            })}
+          </motion.div>
+        </div>
+      </section>
+
+      <section id="demo" className="section">
         <div className="shell">
           <SectionHead
             eyebrow="Demo path"
             title="The proof isn’t the send. It’s the refuse."
-            lede="One call walks Encode × Circle Arc end-to-end: onboard, settle, hit a hard ceiling, then buy a capability with x402."
+            lede="One call walks the rail: onboard, settle under policy, hit a hard ceiling, freeze a spoken rule, then buy a capability with x402."
           />
 
           <div className="split-media split-media--flip">
@@ -208,10 +303,11 @@ export function Sections() {
                 viewport={viewport}
               >
                 {[
-                  { k: 'Call', t: 'Join', d: 'Agent greets you by name.' },
-                  { k: 'Speak', t: 'Send', d: 'Tiny Arc USDC settles under policy.' },
-                  { k: 'Push', t: 'Refuse', d: 'Hard ceiling holds.' },
-                  { k: 'Ask', t: 'Nanopay', d: 'Agent buys the answer via x402.' },
+                  { k: 'Call', t: 'Onboard', d: 'Name + keypad PIN. Wallet on this number.' },
+                  { k: 'Speak', t: 'Send', d: 'Pending-claim escrow if they’ve never joined.' },
+                  { k: 'Push', t: 'Refuse', d: 'Hard ceiling — no PIN dance.' },
+                  { k: 'Rule', t: 'Freeze', d: 'Spoken policy compiles; PIN locks it.' },
+                  { k: 'Ask', t: 'Nanopay', d: 'Agent buys price, research, or a shop cart link.' },
                 ].map((row) => (
                   <motion.div key={row.k} className="demo__step" variants={fadeUp}>
                     <div className="demo__node">{row.k}</div>
@@ -231,8 +327,8 @@ export function Sections() {
         <div className="shell">
           <SectionHead
             eyebrow="Trust"
-            title="Policy before personality."
-            lede="We demo an agent that cannot overspend. Thin core, fat partners: Circle for money, marketplace for capabilities, guru for inbound identity."
+            title="LLM proposes. Code disposes."
+            lede="We demo an agent that cannot overspend — and cannot loosen a rule you froze. Thin core, fat partners: Circle for money, marketplace for capabilities, guru for inbound identity."
           />
 
           <div className="split-media">
@@ -247,17 +343,17 @@ export function Sections() {
                 {
                   n: 'Gate',
                   title: 'Deterministic leash',
-                  body: 'Soft caps, daily budgets, hard ceilings — enforced in code.',
+                  body: 'Soft caps, daily budgets, hard ceilings, spoken rules — enforced in code.',
                 },
                 {
                   n: 'Moat',
                   title: 'Own the inbound',
-                  body: 'Phone ↔ wallet binding, voice confirm, SMS receipts.',
+                  body: 'Phone ↔ wallet, PIN lockout & recovery, flash balance, voice confirm.',
                 },
                 {
                   n: 'Expand',
                   title: 'Buy the world',
-                  body: 'x402 turns every call into a purchasing agent.',
+                  body: 'x402 last mile: call humans, research, fraud check, shop — still under policy.',
                 },
               ].map((card) => (
                 <motion.article key={card.n} className="card" variants={fadeUp}>
@@ -291,20 +387,20 @@ export function Sections() {
               <motion.div className="split__col" variants={fadeUp}>
                 <h3>We ship</h3>
                 <ul>
-                  <li>USDC only on Circle Arc</li>
-                  <li>Voice primary, SMS parity</li>
-                  <li>Hard policy over soft vibes</li>
-                  <li>Names, phones, contacts as payees</li>
-                  <li>x402 marketplace nanopay</li>
+                  <li>USDC on Circle Arc (testnet proven)</li>
+                  <li>Voice primary, SMS / chat parity</li>
+                  <li>Spoken policy + hard ceilings</li>
+                  <li>Pending-claim escrow, not ghost wallets</li>
+                  <li>x402 agent surface + Shop cart links</li>
                 </ul>
               </motion.div>
               <motion.div className="split__col split__col--no" variants={fadeUp}>
                 <h3>We refuse</h3>
                 <ul>
                   <li>DEX / custom token theater</li>
-                  <li>Multi-chain bridge UIs</li>
-                  <li>Perps & prediction scope creep</li>
+                  <li>Silent custody downgrades</li>
                   <li>LLM-authorized spending</li>
+                  <li>Auto-complete shop checkout</li>
                   <li>App-store dependency for users</li>
                 </ul>
               </motion.div>
@@ -319,7 +415,7 @@ export function Sections() {
           <SectionHead
             eyebrow="Roadmap"
             title="Ship the rail. Widen the surface."
-            lede="Arc, x402, and cheap telephony just converged. Same core — more doors."
+            lede="Mainnet proof, then corridor liquidity. Airtime-out is spend — not the unlock."
           />
 
           <div className="split-media split-media--flip">
@@ -335,17 +431,17 @@ export function Sections() {
                 {
                   when: 'Now',
                   what: 'Foundation',
-                  how: 'Voice + SMS, Arc USDC, policy gate, x402 nanopay.',
+                  how: 'Voice + SMS, Arc testnet USDC, spoken policy, pending claims, flash, shop, x402 B2A.',
                 },
                 {
                   when: 'Next',
-                  what: 'Identity & custody',
-                  how: 'GuruNS, Agent Wallets, DTMF PIN, maker-checker.',
+                  what: 'Production money',
+                  how: 'One mainnet transfer, telco SIM signals, live callback, corridor escrow with a partner.',
                 },
                 {
                   when: 'Scale',
                   what: 'Distribution',
-                  how: 'WhatsApp, USSD, MCP, guru as an x402 API.',
+                  how: 'WhatsApp · USSD · sell the hotline as production x402.',
                 },
                 {
                   when: 'Horizon',
@@ -388,7 +484,7 @@ export function Sections() {
                 </motion.li>
                 <motion.li variants={fadeUp}>
                   <strong>Telco / SMS</strong>
-                  Short codes and voice trunks where remittance already lives.
+                  Short codes, voice trunks, SIM-change signals where remittance lives.
                 </motion.li>
                 <motion.li variants={fadeUp}>
                   <strong>Capital</strong>
@@ -411,10 +507,10 @@ export function Sections() {
                   type="button"
                   className="btn btn--ghost-light"
                   onClick={() =>
-                    document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })
+                    document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })
                   }
                 >
-                  See the demo path
+                  See features
                 </button>
               </motion.div>
             </div>

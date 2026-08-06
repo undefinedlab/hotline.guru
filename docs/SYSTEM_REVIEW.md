@@ -14,7 +14,7 @@ This document describes what is built today, how the pieces connect, and what is
 |-----------|-----------------|
 | Telephony = UI | Voice (Asterisk + FastAGI), SMS, WhatsApp, Telegram — no wallet app required |
 | Policy = leash | Soft / daily / hard caps by identity tier; refusal is a feature |
-| Circle / Arc = money | Default custody is Circle DCW on Arc Testnet (SCA + Gas Station) |
+| Circle / Arc = money | Default custody is Circle DCW on **Arc Testnet** (SCA + Gas Station). Mainnet pending prod credentials. |
 | x402 = spend | Optional live marketplace pay; public price fallback otherwise |
 | No own token | USDC only; spoken “USDT” maps to USDC on Arc |
 | LLM never authorizes | Intent parsing may be smart later; `evaluatePolicy` + PIN gate money |
@@ -78,22 +78,28 @@ This document describes what is built today, how the pieces connect, and what is
 ### Default: Circle developer-controlled wallets
 
 1. Set `CIRCLE_API_KEY` → `npm run circle:register-secret` → `CIRCLE_WALLET_SET_ID`.
-2. `WALLET_MODE=circle` (default). Soft-falls to local EOAs if Circle creds are missing (lab warn).
-3. New users get an SCA wallet when `CIRCLE_ACCOUNT_TYPE=SCA` / `CIRCLE_GAS_STATION=1` (Gas Station can sponsor fees on Arc testnet).
-4. Transfers: Circle API → poll to COMPLETE → ArcScan link in reply.
+2. `WALLET_MODE=circle` (default). **No silent fallback** to local EOAs — use `WALLET_MODE=local` or lab-only `ALLOW_LOCAL_FALLBACK=1`.
+3. New users get an SCA wallet when Gas Station / SCA is enabled.
+4. Transfers: Circle API → poll to COMPLETE (or `ASYNC_SETTLE` ack) → ArcScan link.
 5. Smoke: `npm run circle:smoke`.
 
-### Fallback: local EOAs
+**Investor-safe claim:** Settlement path proven on Arc testnet; mainnet pending Circle production credentials.
 
-- Encrypted private keys in DB (`WALLET_SECRET` scrypt-derived AES).
+### Fallback: local EOAs (explicit only)
+
+- Encrypted private keys in DB (`WALLET_SECRET`).
 - Tests force `WALLET_MODE=local`.
-- Operator / lab funding scripts still exist for Encode demos.
+
+### Pending claims (not unconsented wallets)
+
+- Send to an unknown MSISDN → **escrow hold**, not a minted wallet.
+- Recipient onboard → funds release; else expire/refund sender after `PENDING_CLAIM_DAYS`.
+- Daily pending-claim cap per sender (griefing brake).
 
 ### Identity of funds
 
-- **Caller phone** (or `tg:…`) owns a wallet row.
-- **Send to unknown phone** provisions the payee wallet immediately; later onboard reuses that address (balance already there).
-- Never speak hex on voice/SMS UX when HotlineNS / phone labels exist.
+- **Caller phone** (or `tg:…`) owns a wallet row after onboard.
+- Never speak hex when HotlineNS / phone labels exist.
 
 ---
 
@@ -111,14 +117,14 @@ This document describes what is built today, how the pieces connect, and what is
 
 ---
 
-## 6. HotlineNS
+## 6. HotlineNS (shipped, deliberately off-chain)
 
-App-owned name registry (not on-chain ENS yet):
+App-owned name registry — **not** a gap vs ArcNS:
 
 - `CLAIM alice` → `alice.hotline` → phone → wallet.
 - `WHOIS alice` → confirms registration **without** returning MSISDN.
-- `send 2 to alice.hotline` resolves via `hotline_names`.
-- Global first-name payee lookup is **disabled** (privacy).
+- Keeping names off-chain preserves revocation and reduces the privacy surface of “name → phone → wallet.”
+- On-chain ArcNS can bind later; UX never depends on it.
 
 ---
 
@@ -168,16 +174,16 @@ Readiness without secrets: `GET /v1/channels` (auth outside lab).
 |---------|----------|
 | Lab HTTP | Open in lab unless `LAB_HTTP_API=0`; staging needs `LAB_HTTP_API=1` + `LAB_API_TOKEN` |
 | Webhooks | `WEBHOOK_VERIFY=1` required in staging; Telnyx ed25519 preferred |
-| PIN | scrypt (`v2:salt:hash`); legacy SHA-256 still verifies; cannot reset with `PIN …` once onboarded |
-| Idempotency | Claim-before-transfer; concurrent confirm → inflight / completed |
-| Logs | Phone/name-like fields hashed; PIN digit runs redacted |
-| WHOIS | No phone leak |
-| Containers | Non-root `hotline` user; AGI not published from compose |
-| Staging boot | Refuses weak `WALLET_SECRET`, missing Postgres/Circle, demo/mock SIM |
-| STT | TTS id allowlisted (path traversal hardened) |
-| Rate limit | In-process sliding window (not multi-instance yet) |
+| PIN | scrypt (`v2:`); lockout after `PIN_MAX_FAILS`; `CHANGE PIN` / `RECOVER PIN` with cool-down |
+| Idempotency | Claim-before-transfer |
+| SIM / risk | `REPORT SIM` cool-down; recovery also sets cool-down; telco signal is the real fix |
+| Caller ID | Treated as claim — larger amounts need `CALLBACK` verify window |
+| Pending claims | Escrow, not ghost wallets; expiry refund |
+| Audit | Hash-chained `policy_audit` |
+| Custody | No silent Circle→local downgrade |
+| Async settle | `ASYNC_SETTLE=1` ack-then-text for voice |
 
-**Still open:** async Circle settlement worker, Redis rate limits, CHANGE-PIN flow, ledger retention TTL, compiled runtime (no `tsx` in prod).
+**Still open:** live telco SIM-change feed, real outbound callback on trunk, corridor cash-in/out escrow swap, one **mainnet** Circle transfer proof, Redis rate limits.
 
 ---
 
@@ -247,29 +253,45 @@ npm test && docker build -t hotline.guru:local .
 
 ## 13. What works vs what’s next
 
-### Shipped and usable
+> Full matrix: **[FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md)** (2026-08-05). Below is the short cut.
 
-- Forced onboard → PIN → phone-to-phone / HotlineNS send with refuse path  
-- Circle DCW default + local fallback  
-- Voice (AGI + STT) + SMS/WA/TG ingress  
-- Identity tiers + SIM attest story (mock in lab)  
-- Docker all-in-one + Postgres  
-- Policy audit export, backups, CI, security hardening pass  
+### Works in lab (tested or clear smoke)
 
-### Blocked on external accounts
+- Forced onboard → PIN → send / refuse ceiling  
+- Spoken policy compile → PIN freeze → enforce  
+- Pending-claim hold (unknown MSISDN) — fulfill on onboard  
+- PIN lockout · HotlineNS · identity VERIFY (hash)  
+- Hash-chained policy audit · no silent Circle→local fallback  
+- Softphone AGI · flash balance · dial-a-rate · voice memo  
+- x402 lab: discover / shop / buy / ask (mock SMS)  
+- Marketing frontend modules + features  
 
-- Live inbound DID + Telnyx/AT production credentials  
+### Partial (code yes — stub, mock, or no worker)
+
+- RECOVER PIN / CALLBACK — **outbound call stub**  
+- REPORT SIM cool-down — **manual**, no telco feed  
+- Standing orders — create OK; worker is one-shot CLI, **no cron**  
+- Pending-claim **expiry** — function exists, **not scheduled**  
+- Savings lock — code OK, thin tests  
+- SMS / WA / TG — adapters OK, default **mock**  
+- x402 call / research / fraud / proxy — need `MARKETPLACE_LIVE`  
+- SIM ATTEST live — needs BlockRun pay  
+
+### Blocked on external accounts / ops
+
+- Live inbound DID + Telnyx/AT production  
 - Live WhatsApp / Telegram tokens  
-- Proven funded Circle send on Arc testnet in your console (code path exists; ops proof is yours)
+- Proven **funded** Circle send on Arc testnet in *your* console  
+- Marketplace live nanopay (Gateway + `OPERATOR_ARC_ADDRESS`)  
 
-### Product gaps (architecture “Next”)
+### Missing
 
-- Escrowed P2P cash-out + codes  
-- Airtime / bills out via aggregator  
-- Maker-checker / business accounts  
-- On-chain ArcNS binding for HotlineNS  
-- Default live x402 (`MARKETPLACE_LIVE=1`)  
-- Async settlement + horizontal rate limiting  
+1. One real **mainnet** transfer (so the claim is unqualified).  
+2. Live SIM-change from telco + real outbound callback.  
+3. Corridor **cash-in/out** escrow swap with a licensed partner.  
+4. Operator / product UI (frontend is pitch site only).  
+
+HotlineNS off-chain is **not** a gap.
 
 ---
 
@@ -286,6 +308,7 @@ Policy always wins over the model. The phone is the account. Circle holds the ke
 
 ## Related docs
 
+- [docs/FUNCTIONALITY_AUDIT.md](FUNCTIONALITY_AUDIT.md) — what works / partial / blocked  
 - [README.md](../README.md) — quick start  
 - [kb.md](../kb.md) — idea history / peers  
 - [DEMO.md](../DEMO.md) — pitch script  

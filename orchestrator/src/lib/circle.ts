@@ -29,20 +29,30 @@ let warnedMissingCircle = false;
 
 /**
  * Resolve custody backend.
- * Default: circle (when creds present). Explicit WALLET_MODE=local for lab EOAs.
- * If WALLET_MODE=circle (or unset) without creds → soft-fallback to local with a warn.
+ * - WALLET_MODE=local → local EOAs (lab/tests)
+ * - WALLET_MODE=circle (default) → Circle when configured; **no silent fallback**
+ * - ALLOW_LOCAL_FALLBACK=1 → lab-only explicit opt-in if Circle creds missing
  */
 export function resolveWalletMode(): "circle" | "local" {
   const raw = (process.env.WALLET_MODE ?? "circle").toLowerCase().trim();
   if (raw === "local") return "local";
   if (circleConfigured()) return "circle";
-  if (!warnedMissingCircle && (raw === "circle" || !process.env.WALLET_MODE)) {
+  if (process.env.ALLOW_LOCAL_FALLBACK === "1") {
+    if (!warnedMissingCircle) {
+      warnedMissingCircle = true;
+      log.warn(
+        "ALLOW_LOCAL_FALLBACK=1 — using local EOAs. Never enable outside lab; staging must use Circle.",
+      );
+    }
+    return "local";
+  }
+  if (!warnedMissingCircle) {
     warnedMissingCircle = true;
-    log.warn(
-      "Circle is the default money path but CIRCLE_* creds are missing — using local EOAs. Set CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID (or WALLET_MODE=local).",
+    log.error(
+      "WALLET_MODE=circle but CIRCLE_* missing — refusing silent local fallback. Set CIRCLE_* or WALLET_MODE=local / ALLOW_LOCAL_FALLBACK=1 (lab only).",
     );
   }
-  return "local";
+  return "circle";
 }
 
 /** Gas Station needs SCA wallets on Arc (testnet has a default policy). Default: SCA. */

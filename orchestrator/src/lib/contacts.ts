@@ -5,9 +5,12 @@ import { ensureWallet } from "./wallets.js";
 
 export type ResolvedPayee = {
   label: string;
-  address: Address;
+  /** Null when destination is an unknown MSISDN → pending-claim escrow path */
+  address: Address | null;
   phone?: string;
+  /** @deprecated unconsented wallet mint removed — always false for new unknowns */
   provisioned: boolean;
+  pendingClaim?: boolean;
 };
 
 function looksLikePhone(raw: string): boolean {
@@ -37,29 +40,45 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
   }
   if (contact?.contact_phone) {
     const phone = normalizePhone(contact.contact_phone);
-    const existed = !!(await getUser(phone));
-    const u = existed ? (await getUser(phone))! : await ensureWallet(phone);
+    const u = await getUser(phone);
+    if (u) {
+      return {
+        label: contact.contact_name,
+        address: u.wallet_address as Address,
+        phone,
+        provisioned: false,
+      };
+    }
     return {
       label: contact.contact_name,
-      address: u.wallet_address as Address,
+      address: null,
       phone,
-      provisioned: !existed,
+      provisioned: false,
+      pendingClaim: true,
     };
   }
 
   if (looksLikePhone(raw)) {
     const phone = normalizePhone(raw);
-    const existed = !!(await getUser(phone));
-    const u = existed ? (await getUser(phone))! : await ensureWallet(phone);
+    const u = await getUser(phone);
+    if (u) {
+      return {
+        label: phone,
+        address: u.wallet_address as Address,
+        phone,
+        provisioned: false,
+      };
+    }
+    // Unknown MSISDN — do NOT mint a custodial wallet. Pending claim / escrow.
     return {
       label: phone,
-      address: u.wallet_address as Address,
+      address: null,
       phone,
-      provisioned: !existed,
+      provisioned: false,
+      pendingClaim: true,
     };
   }
 
-  // HotlineNS only — no global first-name directory (privacy)
   if (looksLikeHotline(raw)) {
     const byNs = await getUserByHotlineName(normalizeHotlineLabel(raw));
     if (byNs) {
@@ -74,3 +93,6 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
 
   return null;
 }
+
+/** Only used when we intentionally create a wallet (caller onboard / escrow). */
+export { ensureWallet };

@@ -188,6 +188,27 @@ app.post("/v1/call/start", async (c) => {
   return c.json(result);
 });
 
+/** Flash / missed call → balance SMS */
+app.post("/v1/call/missed", async (c) => {
+  const denied = requireLabHttp(c);
+  if (denied) return denied;
+  const body = await c.req.json<{ phone?: string }>();
+  if (!body.phone) return c.json({ error: "phone required" }, 400);
+  const limited = rateLimited(c, body.phone);
+  if (limited) return limited;
+  const { handleMissedCall } = await import("./lib/pipeline.js");
+  return c.json(await handleMissedCall(body.phone));
+});
+
+/** Dial-a-rate guest path */
+app.post("/v1/call/rate", async (c) => {
+  const denied = requireLabHttp(c);
+  if (denied) return denied;
+  const body = await c.req.json<{ phone?: string }>().catch(() => ({} as { phone?: string }));
+  const { handleDialRate } = await import("./lib/pipeline.js");
+  return c.json(await handleDialRate(body.phone));
+});
+
 app.post("/v1/message", async (c) => {
   const denied = requireLabHttp(c);
   if (denied) return denied;
@@ -198,6 +219,79 @@ app.post("/v1/message", async (c) => {
   if (limited) return limited;
   const result = await handleMessage(who, body.text || "hi");
   return c.json(result);
+});
+
+/** Agent-to-human + marketplace x402 surface */
+app.get("/v1/x402", async (c) => {
+  const { X402_RESOURCES, marketplaceAliasesForAgents } = await import("./lib/x402.js");
+  return c.json({
+    service: "hotline.guru",
+    framing:
+      "Agent-to-human last mile + Circle marketplace chaining — pay once, reach a phone or buy any allowlisted x402",
+    resources: X402_RESOURCES,
+    marketplaceAliases: marketplaceAliasesForAgents(),
+    catalog: "https://agents.circle.com/services",
+    discovery: "https://api.circle.com/v2/x402/discovery/resources",
+  });
+});
+
+app.post("/v1/x402/:capability", async (c) => {
+  const capabilityRaw = c.req.param("capability");
+  const { fulfillX402, isX402Capability, paymentRequiredBody, verifyX402Payment } =
+    await import("./lib/x402.js");
+  if (!isX402Capability(capabilityRaw)) {
+    return c.json({ error: "unknown capability", hint: "GET /v1/x402" }, 404);
+  }
+  const capability = capabilityRaw;
+  const body = await c.req.json<{
+    to?: string;
+    amount?: number;
+    question?: string;
+    memo?: string;
+    symbol?: string;
+    query?: string;
+    task?: string;
+    url?: string;
+    method?: "GET" | "POST" | "PUT";
+    data?: unknown;
+    provider?: "stablephone" | "bland";
+    web?: boolean;
+    handle?: string;
+    qty?: number;
+    payment?: { proof?: string };
+  }>();
+
+  const paid = verifyX402Payment({
+    capability,
+    body,
+    paymentHeader: c.req.header("x-payment") ?? undefined,
+    paymentProof: body.payment?.proof,
+  });
+  if (!paid.ok) {
+    return c.json(paymentRequiredBody(capability), 402);
+  }
+
+  const limited = rateLimited(c, body.to ?? body.url ?? body.query ?? capability);
+  if (limited) return limited;
+
+  const result = await fulfillX402({
+    capability,
+    to: body.to,
+    amount: body.amount,
+    question: body.question,
+    memo: body.memo,
+    symbol: body.symbol,
+    query: body.query,
+    task: body.task,
+    url: body.url,
+    method: body.method,
+    data: body.data,
+    provider: body.provider,
+    web: body.web,
+    handle: body.handle,
+    qty: body.qty,
+  });
+  return c.json({ ...result, paymentMode: paid.mode });
 });
 
 app.get("/webhooks/whatsapp", (c) => {

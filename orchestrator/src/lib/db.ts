@@ -4,6 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 import pg from "pg";
 
@@ -23,6 +24,10 @@ export type User = {
   sim_attest_provider: string | null;
   sim_attest_at: string | null;
   hotline_name: string | null;
+  risk_cooldown_until: string | null;
+  callback_verified_until: string | null;
+  recovery_code_hash: string | null;
+  recovery_expires_at: string | null;
   created_at: string;
 };
 
@@ -99,8 +104,66 @@ CREATE TABLE IF NOT EXISTS hotline_names (
   phone TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS pending_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_phone TEXT NOT NULL,
+  to_phone TEXT NOT NULL,
+  amount_usdc REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'held',
+  hold_tx_hash TEXT,
+  settle_tx_hash TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS pending_claims_to_status ON pending_claims (to_phone, status);
+CREATE INDEX IF NOT EXISTS pending_claims_from_created ON pending_claims (from_phone, created_at);
+CREATE TABLE IF NOT EXISTS user_policy_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL,
+  rule_id TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  max_usdc REAL,
+  label TEXT,
+  spoken TEXT NOT NULL,
+  readback TEXT NOT NULL,
+  rules_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS user_policy_rules_phone ON user_policy_rules (phone, status);
+CREATE TABLE IF NOT EXISTS standing_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL,
+  amount_usdc REAL NOT NULL,
+  to_label TEXT NOT NULL,
+  to_phone TEXT,
+  to_address TEXT,
+  cadence TEXT NOT NULL,
+  next_run_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_idem TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS standing_orders_next ON standing_orders (status, next_run_at);
+CREATE TABLE IF NOT EXISTS savings_locks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT NOT NULL,
+  amount_usdc REAL NOT NULL,
+  unlock_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS savings_locks_phone ON savings_locks (phone, status);
 `);
   ensureUserColumnsSqlite(db);
+  ensurePolicyAuditHashSqlite(db);
+}
+
+function ensurePolicyAuditHashSqlite(db: Database.Database) {
+  const cols = db.prepare("PRAGMA table_info(policy_audit)").all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("prev_hash")) db.exec("ALTER TABLE policy_audit ADD COLUMN prev_hash TEXT");
+  if (!names.has("entry_hash")) db.exec("ALTER TABLE policy_audit ADD COLUMN entry_hash TEXT");
 }
 
 function ensureUserColumnsSqlite(db: Database.Database) {
@@ -117,6 +180,10 @@ function ensureUserColumnsSqlite(db: Database.Database) {
   add("sim_attest_provider", "sim_attest_provider TEXT");
   add("sim_attest_at", "sim_attest_at TEXT");
   add("hotline_name", "hotline_name TEXT");
+  add("risk_cooldown_until", "risk_cooldown_until TEXT");
+  add("callback_verified_until", "callback_verified_until TEXT");
+  add("recovery_code_hash", "recovery_code_hash TEXT");
+  add("recovery_expires_at", "recovery_expires_at TEXT");
 }
 
 async function migratePostgres(client: pg.Pool) {
@@ -177,6 +244,55 @@ CREATE TABLE IF NOT EXISTS hotline_names (
   phone TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS pending_claims (
+  id BIGSERIAL PRIMARY KEY,
+  from_phone TEXT NOT NULL,
+  to_phone TEXT NOT NULL,
+  amount_usdc DOUBLE PRECISION NOT NULL,
+  status TEXT NOT NULL DEFAULT 'held',
+  hold_tx_hash TEXT,
+  settle_tx_hash TEXT,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS pending_claims_to_status ON pending_claims (to_phone, status);
+CREATE TABLE IF NOT EXISTS user_policy_rules (
+  id BIGSERIAL PRIMARY KEY,
+  phone TEXT NOT NULL,
+  rule_id TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL,
+  max_usdc DOUBLE PRECISION,
+  label TEXT,
+  spoken TEXT NOT NULL,
+  readback TEXT NOT NULL,
+  rules_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS user_policy_rules_phone ON user_policy_rules (phone, status);
+CREATE TABLE IF NOT EXISTS standing_orders (
+  id BIGSERIAL PRIMARY KEY,
+  phone TEXT NOT NULL,
+  amount_usdc DOUBLE PRECISION NOT NULL,
+  to_label TEXT NOT NULL,
+  to_phone TEXT,
+  to_address TEXT,
+  cadence TEXT NOT NULL,
+  next_run_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_idem TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS standing_orders_next ON standing_orders (status, next_run_at);
+CREATE TABLE IF NOT EXISTS savings_locks (
+  id BIGSERIAL PRIMARY KEY,
+  phone TEXT NOT NULL,
+  amount_usdc DOUBLE PRECISION NOT NULL,
+  unlock_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS savings_locks_phone ON savings_locks (phone, status);
 `);
   await client.query(`
 ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_tier INTEGER NOT NULL DEFAULT 0;
@@ -185,6 +301,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_status TEXT NOT NULL DEFAU
 ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_provider TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS sim_attest_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS hotline_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS risk_cooldown_until TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS callback_verified_until TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_code_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_expires_at TIMESTAMPTZ;
+ALTER TABLE policy_audit ADD COLUMN IF NOT EXISTS prev_hash TEXT;
+ALTER TABLE policy_audit ADD COLUMN IF NOT EXISTS entry_hash TEXT;
 `);
 }
 
@@ -250,6 +372,12 @@ function mapUser(row: Record<string, unknown> | undefined): User | undefined {
     sim_attest_provider: (row.sim_attest_provider as string) ?? null,
     sim_attest_at: row.sim_attest_at ? String(row.sim_attest_at) : null,
     hotline_name: (row.hotline_name as string) ?? null,
+    risk_cooldown_until: row.risk_cooldown_until ? String(row.risk_cooldown_until) : null,
+    callback_verified_until: row.callback_verified_until
+      ? String(row.callback_verified_until)
+      : null,
+    recovery_code_hash: (row.recovery_code_hash as string) ?? null,
+    recovery_expires_at: row.recovery_expires_at ? String(row.recovery_expires_at) : null,
     created_at: String(row.created_at),
   };
 }
@@ -831,7 +959,7 @@ export async function saveIdempotentResult(
   }
 }
 
-/** Append-only policy gate decision (compliance artefact). */
+/** Append-only policy gate decision with hash-chain (tamper-evident). */
 export async function recordPolicyDecision(entry: {
   phone: string;
   action: string;
@@ -844,10 +972,29 @@ export async function recordPolicyDecision(entry: {
   await initDb();
   const p = normalizePhone(entry.phone);
   const intentJson = entry.intent != null ? JSON.stringify(entry.intent) : null;
+  const prev = await latestPolicyHash();
+  const createdAt = new Date().toISOString();
+  const entryHash = createHash("sha256")
+    .update(
+      [
+        prev ?? "genesis",
+        p,
+        entry.action,
+        entry.verdict,
+        entry.reason ?? "",
+        String(entry.amount_usdc ?? ""),
+        entry.payee ?? "",
+        intentJson ?? "",
+        createdAt,
+      ].join("|"),
+    )
+    .digest("hex");
+
   if (usingPostgres) {
     await pool!.query(
-      `INSERT INTO policy_audit (phone, action, verdict, reason, amount_usdc, payee, intent_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO policy_audit
+         (phone, action, verdict, reason, amount_usdc, payee, intent_json, prev_hash, entry_hash, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         p,
         entry.action,
@@ -856,13 +1003,17 @@ export async function recordPolicyDecision(entry: {
         entry.amount_usdc ?? null,
         entry.payee ?? null,
         intentJson,
+        prev,
+        entryHash,
+        createdAt,
       ],
     );
   } else {
     sqliteDb()
       .prepare(
-        `INSERT INTO policy_audit (phone, action, verdict, reason, amount_usdc, payee, intent_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO policy_audit
+           (phone, action, verdict, reason, amount_usdc, payee, intent_json, prev_hash, entry_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         p,
@@ -872,8 +1023,26 @@ export async function recordPolicyDecision(entry: {
         entry.amount_usdc ?? null,
         entry.payee ?? null,
         intentJson,
+        prev,
+        entryHash,
+        createdAt,
       );
   }
+}
+
+async function latestPolicyHash(): Promise<string | null> {
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT entry_hash FROM policy_audit WHERE entry_hash IS NOT NULL ORDER BY id DESC LIMIT 1`,
+    );
+    return r.rows[0]?.entry_hash ? String(r.rows[0].entry_hash) : null;
+  }
+  const row = sqliteDb()
+    .prepare(
+      `SELECT entry_hash FROM policy_audit WHERE entry_hash IS NOT NULL ORDER BY id DESC LIMIT 1`,
+    )
+    .get() as { entry_hash: string } | undefined;
+  return row?.entry_hash ?? null;
 }
 
 export type PolicyAuditRow = {
@@ -885,8 +1054,206 @@ export type PolicyAuditRow = {
   amount_usdc: number | null;
   payee: string | null;
   intent_json: string | null;
+  prev_hash?: string | null;
+  entry_hash?: string | null;
   created_at: string;
 };
+
+export type PendingClaim = {
+  id: number;
+  from_phone: string;
+  to_phone: string;
+  amount_usdc: number;
+  status: string;
+  hold_tx_hash: string | null;
+  settle_tx_hash: string | null;
+  expires_at: string;
+  created_at: string;
+};
+
+function mapClaim(row: Record<string, unknown>): PendingClaim {
+  return {
+    id: Number(row.id),
+    from_phone: String(row.from_phone),
+    to_phone: String(row.to_phone),
+    amount_usdc: Number(row.amount_usdc),
+    status: String(row.status),
+    hold_tx_hash: row.hold_tx_hash ? String(row.hold_tx_hash) : null,
+    settle_tx_hash: row.settle_tx_hash ? String(row.settle_tx_hash) : null,
+    expires_at: String(row.expires_at),
+    created_at: String(row.created_at),
+  };
+}
+
+export async function createPendingClaim(input: {
+  from_phone: string;
+  to_phone: string;
+  amount_usdc: number;
+  expires_at: string;
+  hold_tx_hash?: string;
+}): Promise<PendingClaim> {
+  await initDb();
+  const from = normalizePhone(input.from_phone);
+  const to = normalizePhone(input.to_phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `INSERT INTO pending_claims (from_phone, to_phone, amount_usdc, status, hold_tx_hash, expires_at)
+       VALUES ($1, $2, $3, 'held', $4, $5) RETURNING *`,
+      [from, to, input.amount_usdc, input.hold_tx_hash ?? null, input.expires_at],
+    );
+    return mapClaim(r.rows[0]);
+  }
+  const info = sqliteDb()
+    .prepare(
+      `INSERT INTO pending_claims (from_phone, to_phone, amount_usdc, status, hold_tx_hash, expires_at)
+       VALUES (?, ?, ?, 'held', ?, ?)`,
+    )
+    .run(from, to, input.amount_usdc, input.hold_tx_hash ?? null, input.expires_at);
+  const row = sqliteDb()
+    .prepare(`SELECT * FROM pending_claims WHERE id = ?`)
+    .get(Number(info.lastInsertRowid)) as Record<string, unknown>;
+  return mapClaim(row);
+}
+
+export async function listHeldClaimsForPayee(toPhone: string): Promise<PendingClaim[]> {
+  await initDb();
+  const to = normalizePhone(toPhone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM pending_claims WHERE to_phone = $1 AND status = 'held' ORDER BY id ASC`,
+      [to],
+    );
+    return r.rows.map((row) => mapClaim(row));
+  }
+  return (
+    sqliteDb()
+      .prepare(
+        `SELECT * FROM pending_claims WHERE to_phone = ? AND status = 'held' ORDER BY id ASC`,
+      )
+      .all(to) as Record<string, unknown>[]
+  ).map(mapClaim);
+}
+
+export async function listExpiredHeldClaims(nowIso: string): Promise<PendingClaim[]> {
+  await initDb();
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM pending_claims WHERE status = 'held' AND expires_at <= $1 ORDER BY id ASC`,
+      [nowIso],
+    );
+    return r.rows.map((row) => mapClaim(row));
+  }
+  return (
+    sqliteDb()
+      .prepare(
+        `SELECT * FROM pending_claims WHERE status = 'held' AND expires_at <= ? ORDER BY id ASC`,
+      )
+      .all(nowIso) as Record<string, unknown>[]
+  ).map(mapClaim);
+}
+
+export async function markPendingClaim(
+  id: number,
+  status: "claimed" | "expired" | "refunded",
+  settleTxHash?: string,
+): Promise<void> {
+  await initDb();
+  if (usingPostgres) {
+    await pool!.query(
+      `UPDATE pending_claims SET status = $1, settle_tx_hash = COALESCE($2, settle_tx_hash) WHERE id = $3`,
+      [status, settleTxHash ?? null, id],
+    );
+  } else {
+    sqliteDb()
+      .prepare(
+        `UPDATE pending_claims SET status = ?, settle_tx_hash = COALESCE(?, settle_tx_hash) WHERE id = ?`,
+      )
+      .run(status, settleTxHash ?? null, id);
+  }
+}
+
+export async function sumPendingClaimsToday(fromPhone: string): Promise<number> {
+  await initDb();
+  const p = normalizePhone(fromPhone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT COUNT(*)::int AS n FROM pending_claims
+       WHERE from_phone = $1 AND created_at::date = CURRENT_DATE`,
+      [p],
+    );
+    return Number(r.rows[0]?.n ?? 0);
+  }
+  const row = sqliteDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM pending_claims
+       WHERE from_phone = ? AND date(created_at) = date('now')`,
+    )
+    .get(p) as { n: number };
+  return Number(row.n ?? 0);
+}
+
+export async function setRiskCooldown(phone: string, untilIso: string): Promise<User> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(`UPDATE users SET risk_cooldown_until = $1 WHERE phone = $2`, [untilIso, p]);
+  } else {
+    sqliteDb().prepare(`UPDATE users SET risk_cooldown_until = ? WHERE phone = ?`).run(untilIso, p);
+  }
+  return (await getUser(p))!;
+}
+
+export async function setCallbackVerified(phone: string, untilIso: string): Promise<User> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(`UPDATE users SET callback_verified_until = $1 WHERE phone = $2`, [
+      untilIso,
+      p,
+    ]);
+  } else {
+    sqliteDb()
+      .prepare(`UPDATE users SET callback_verified_until = ? WHERE phone = ?`)
+      .run(untilIso, p);
+  }
+  return (await getUser(p))!;
+}
+
+export async function setRecoveryChallenge(
+  phone: string,
+  codeHash: string,
+  expiresIso: string,
+): Promise<void> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(
+      `UPDATE users SET recovery_code_hash = $1, recovery_expires_at = $2 WHERE phone = $3`,
+      [codeHash, expiresIso, p],
+    );
+  } else {
+    sqliteDb()
+      .prepare(
+        `UPDATE users SET recovery_code_hash = ?, recovery_expires_at = ? WHERE phone = ?`,
+      )
+      .run(codeHash, expiresIso, p);
+  }
+}
+
+export async function clearRecoveryChallenge(phone: string): Promise<void> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(
+      `UPDATE users SET recovery_code_hash = NULL, recovery_expires_at = NULL WHERE phone = $1`,
+      [p],
+    );
+  } else {
+    sqliteDb()
+      .prepare(`UPDATE users SET recovery_code_hash = NULL, recovery_expires_at = NULL WHERE phone = ?`)
+      .run(p);
+  }
+}
 
 /** Export policy decisions for compliance (newest first). */
 export async function listPolicyAudit(opts?: {
@@ -946,4 +1313,340 @@ export async function listPolicyAudit(opts?: {
        FROM policy_audit ORDER BY id DESC LIMIT ?`,
     )
     .all(limit) as PolicyAuditRow[];
+}
+
+export type UserRuleRow = {
+  id: number;
+  phone: string;
+  rule_id: string;
+  kind: string;
+  max_usdc: number | null;
+  label: string | null;
+  spoken: string;
+  readback: string;
+  rules_hash: string | null;
+  status: string;
+  created_at: string;
+};
+
+export async function insertUserRule(row: {
+  phone: string;
+  rule_id: string;
+  kind: string;
+  max_usdc: number | null;
+  label: string | null;
+  spoken: string;
+  readback: string;
+  rules_hash: string | null;
+}): Promise<void> {
+  await initDb();
+  const p = normalizePhone(row.phone);
+  if (usingPostgres) {
+    await pool!.query(
+      `INSERT INTO user_policy_rules
+       (phone, rule_id, kind, max_usdc, label, spoken, readback, rules_hash, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active')`,
+      [
+        p,
+        row.rule_id,
+        row.kind,
+        row.max_usdc,
+        row.label,
+        row.spoken,
+        row.readback,
+        row.rules_hash,
+      ],
+    );
+    return;
+  }
+  sqliteDb()
+    .prepare(
+      `INSERT INTO user_policy_rules
+       (phone, rule_id, kind, max_usdc, label, spoken, readback, rules_hash, status)
+       VALUES (?,?,?,?,?,?,?,?,'active')`,
+    )
+    .run(
+      p,
+      row.rule_id,
+      row.kind,
+      row.max_usdc,
+      row.label,
+      row.spoken,
+      row.readback,
+      row.rules_hash,
+    );
+}
+
+export async function getActiveUserRules(phone: string): Promise<UserRuleRow[]> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM user_policy_rules WHERE phone = $1 AND status = 'active' ORDER BY id`,
+      [p],
+    );
+    return r.rows as UserRuleRow[];
+  }
+  return sqliteDb()
+    .prepare(`SELECT * FROM user_policy_rules WHERE phone = ? AND status = 'active' ORDER BY id`)
+    .all(p) as UserRuleRow[];
+}
+
+export async function revokeUserRules(phone: string): Promise<void> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    await pool!.query(
+      `UPDATE user_policy_rules SET status = 'revoked' WHERE phone = $1 AND status = 'active'`,
+      [p],
+    );
+    return;
+  }
+  sqliteDb()
+    .prepare(
+      `UPDATE user_policy_rules SET status = 'revoked' WHERE phone = ? AND status = 'active'`,
+    )
+    .run(p);
+}
+
+export async function sumLedgerKindToCounterparty(
+  phone: string,
+  counterparty: string,
+  kinds: string[],
+): Promise<number> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (!kinds.length) return 0;
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT COALESCE(SUM(amount_usdc),0)::float AS s FROM ledger
+       WHERE phone = $1 AND counterparty = $2 AND kind = ANY($3::text[])`,
+      [p, counterparty, kinds],
+    );
+    return Number(r.rows[0]?.s ?? 0);
+  }
+  const placeholders = kinds.map(() => "?").join(",");
+  const row = sqliteDb()
+    .prepare(
+      `SELECT COALESCE(SUM(amount_usdc),0) AS s FROM ledger
+       WHERE phone = ? AND counterparty = ? AND kind IN (${placeholders})`,
+    )
+    .get(p, counterparty, ...kinds) as { s: number };
+  return Number(row?.s ?? 0);
+}
+
+export type StandingOrder = {
+  id: number;
+  phone: string;
+  amount_usdc: number;
+  to_label: string;
+  to_phone: string | null;
+  to_address: string | null;
+  cadence: string;
+  next_run_at: string;
+  status: string;
+  last_idem: string | null;
+  created_at: string;
+};
+
+export async function createStandingOrder(input: {
+  phone: string;
+  amount_usdc: number;
+  to_label: string;
+  to_phone?: string | null;
+  to_address?: string | null;
+  cadence: string;
+  next_run_at: string;
+}): Promise<StandingOrder> {
+  await initDb();
+  const p = normalizePhone(input.phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `INSERT INTO standing_orders
+       (phone, amount_usdc, to_label, to_phone, to_address, cadence, next_run_at, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'active') RETURNING *`,
+      [
+        p,
+        input.amount_usdc,
+        input.to_label,
+        input.to_phone ?? null,
+        input.to_address ?? null,
+        input.cadence,
+        input.next_run_at,
+      ],
+    );
+    return r.rows[0] as StandingOrder;
+  }
+  const info = sqliteDb()
+    .prepare(
+      `INSERT INTO standing_orders
+       (phone, amount_usdc, to_label, to_phone, to_address, cadence, next_run_at, status)
+       VALUES (?,?,?,?,?,?,?,'active')`,
+    )
+    .run(
+      p,
+      input.amount_usdc,
+      input.to_label,
+      input.to_phone ?? null,
+      input.to_address ?? null,
+      input.cadence,
+      input.next_run_at,
+    );
+  return sqliteDb()
+    .prepare(`SELECT * FROM standing_orders WHERE id = ?`)
+    .get(Number(info.lastInsertRowid)) as StandingOrder;
+}
+
+export async function listDueStandingOrders(nowIso: string): Promise<StandingOrder[]> {
+  await initDb();
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM standing_orders WHERE status = 'active' AND next_run_at <= $1 ORDER BY id LIMIT 50`,
+      [nowIso],
+    );
+    return r.rows as StandingOrder[];
+  }
+  return sqliteDb()
+    .prepare(
+      `SELECT * FROM standing_orders WHERE status = 'active' AND next_run_at <= ? ORDER BY id LIMIT 50`,
+    )
+    .all(nowIso) as StandingOrder[];
+}
+
+export async function listStandingOrders(phone: string): Promise<StandingOrder[]> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM standing_orders WHERE phone = $1 AND status = 'active' ORDER BY id`,
+      [p],
+    );
+    return r.rows as StandingOrder[];
+  }
+  return sqliteDb()
+    .prepare(`SELECT * FROM standing_orders WHERE phone = ? AND status = 'active' ORDER BY id`)
+    .all(p) as StandingOrder[];
+}
+
+export async function bumpStandingOrder(
+  id: number,
+  nextRunAt: string,
+  lastIdem: string,
+): Promise<void> {
+  await initDb();
+  if (usingPostgres) {
+    await pool!.query(
+      `UPDATE standing_orders SET next_run_at = $1, last_idem = $2 WHERE id = $3`,
+      [nextRunAt, lastIdem, id],
+    );
+    return;
+  }
+  sqliteDb()
+    .prepare(`UPDATE standing_orders SET next_run_at = ?, last_idem = ? WHERE id = ?`)
+    .run(nextRunAt, lastIdem, id);
+}
+
+export async function cancelStandingOrder(phone: string, id: number): Promise<boolean> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `UPDATE standing_orders SET status = 'cancelled' WHERE id = $1 AND phone = $2 AND status = 'active'`,
+      [id, p],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+  const info = sqliteDb()
+    .prepare(
+      `UPDATE standing_orders SET status = 'cancelled' WHERE id = ? AND phone = ? AND status = 'active'`,
+    )
+    .run(id, p);
+  return info.changes > 0;
+}
+
+export type SavingsLock = {
+  id: number;
+  phone: string;
+  amount_usdc: number;
+  unlock_at: string;
+  status: string;
+  created_at: string;
+};
+
+export async function createSavingsLock(input: {
+  phone: string;
+  amount_usdc: number;
+  unlock_at: string;
+}): Promise<SavingsLock> {
+  await initDb();
+  const p = normalizePhone(input.phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `INSERT INTO savings_locks (phone, amount_usdc, unlock_at, status)
+       VALUES ($1,$2,$3,'active') RETURNING *`,
+      [p, input.amount_usdc, input.unlock_at],
+    );
+    return r.rows[0] as SavingsLock;
+  }
+  const info = sqliteDb()
+    .prepare(
+      `INSERT INTO savings_locks (phone, amount_usdc, unlock_at, status) VALUES (?,?,?,'active')`,
+    )
+    .run(p, input.amount_usdc, input.unlock_at);
+  return sqliteDb()
+    .prepare(`SELECT * FROM savings_locks WHERE id = ?`)
+    .get(Number(info.lastInsertRowid)) as SavingsLock;
+}
+
+export async function sumActiveSavingsLocked(phone: string, nowIso: string): Promise<number> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT COALESCE(SUM(amount_usdc),0)::float AS s FROM savings_locks
+       WHERE phone = $1 AND status = 'active' AND unlock_at > $2`,
+      [p, nowIso],
+    );
+    return Number(r.rows[0]?.s ?? 0);
+  }
+  const row = sqliteDb()
+    .prepare(
+      `SELECT COALESCE(SUM(amount_usdc),0) AS s FROM savings_locks
+       WHERE phone = ? AND status = 'active' AND unlock_at > ?`,
+    )
+    .get(p, nowIso) as { s: number };
+  return Number(row?.s ?? 0);
+}
+
+export async function listSavingsLocks(phone: string): Promise<SavingsLock[]> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM savings_locks WHERE phone = $1 AND status = 'active' ORDER BY id`,
+      [p],
+    );
+    return r.rows as SavingsLock[];
+  }
+  return sqliteDb()
+    .prepare(`SELECT * FROM savings_locks WHERE phone = ? AND status = 'active' ORDER BY id`)
+    .all(p) as SavingsLock[];
+}
+
+export async function releaseMaturedLocks(phone: string, nowIso: string): Promise<number> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `UPDATE savings_locks SET status = 'released' WHERE phone = $1 AND status = 'active' AND unlock_at <= $2`,
+      [p, nowIso],
+    );
+    return r.rowCount ?? 0;
+  }
+  const info = sqliteDb()
+    .prepare(
+      `UPDATE savings_locks SET status = 'released' WHERE phone = ? AND status = 'active' AND unlock_at <= ?`,
+    )
+    .run(p, nowIso);
+  return info.changes;
 }

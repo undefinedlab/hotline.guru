@@ -1,12 +1,20 @@
 /**
  * FastAGI voice path:
+ *   flash/missed → balance SMS
+ *   rate → dial-a-rate (no account)
  *   onboard: welcome → name → DTMF PIN → thanks
- *   returning: greet → command → policy → DTMF PIN confirm → TTS
- * Falls back to DTMF if STT is down.
+ *   returning: greet → command → policy → optional memo → DTMF PIN → TTS
  */
 import net from "node:net";
 import fs from "node:fs";
-import { handleCallStart, handleMessage, type HandleResult } from "../lib/pipeline.js";
+import {
+  attachSendMemo,
+  handleCallStart,
+  handleDialRate,
+  handleMessage,
+  handleMissedCall,
+  type HandleResult,
+} from "../lib/pipeline.js";
 import {
   sharedPaths,
   sttHealthy,
@@ -105,6 +113,26 @@ async function collectPinDigits(
   return digits;
 }
 
+async function maybeRecordMemo(
+  socket: net.Socket,
+  caller: string,
+  result: HandleResult,
+  voiceOk: boolean,
+): Promise<void> {
+  if (!result.needsMemo && !result.data?.offerMemo) return;
+  if (!voiceOk) return;
+  await speak(
+    socket,
+    "Optional: record a short voice note for them after the beep, or press pound to skip.",
+    voiceOk,
+  );
+  const memo = await listen(socket, "", voiceOk);
+  if (memo && memo.length > 2) {
+    const attached = await attachSendMemo(caller, memo);
+    await speak(socket, attached.reply, voiceOk);
+  }
+}
+
 /**
  * First-call (or resume) onboard: name → wallet already on phone row → PIN → thanks.
  * Returns true if caller is ready for commands.
@@ -125,7 +153,6 @@ async function runOnboarding(
     if (forced && !/send|pay|transfer|pin/i.test(forced)) {
       nameText = forced;
     } else if (voiceOk) {
-      // Welcome already asked for the name — just record
       nameText = await listen(socket, "", voiceOk);
     } else {
       await speak(socket, "Text your name to the hotline SMS, then call again.", voiceOk);
@@ -141,7 +168,6 @@ async function runOnboarding(
   }
 
   if (current.needsSetPin) {
-    // Reply already asked for PIN — only collect digits
     const pin = await collectPinDigits(socket, voiceOk, null);
     if (!pin) {
       await speak(socket, "Setup paused. Call back to finish your PIN.", voiceOk);
@@ -152,7 +178,6 @@ async function runOnboarding(
     lastAgiReply.set(caller, current.reply);
   }
 
-  // Onboard complete when we no longer need name/PIN setup
   return !current.needsName && !current.needsSetPin;
 }
 
@@ -165,6 +190,8 @@ async function finishSpendPin(
   let current = result;
   await speak(socket, current.reply, voiceOk);
   lastAgiReply.set(caller, current.reply);
+
+  await maybeRecordMemo(socket, caller, current, voiceOk);
 
   for (let attempt = 0; attempt < 2 && current.needsPin; attempt++) {
     const pin = await collectPinDigits(
@@ -232,16 +259,35 @@ async function handleAgi(socket: net.Socket) {
   }
   const env = parseEnv(header);
   const caller = env["agi_callerid"] || env["agi_accountcode"] || "+10000000000";
-  // Privacy: do not log raw caller id
   console.log(`[agi] call from ${caller.replace(/\d(?=\d{4})/g, "*")}`);
 
   const voiceOk = await sttHealthy();
   console.log(`[agi] STT ${voiceOk ? "up" : "down — DTMF fallback"}`);
 
-  const forced = (env["agi_arg_1"] || "").trim();
+  const forced = (env["agi_arg_1"] || "").trim().toLowerCase();
+
+  // Missed call / flash → balance SMS, hang up
+  if (forced === "missed" || forced === "flash") {
+    const flash = await handleMissedCall(caller);
+    await speak(socket, "Balance by text. Bye.", voiceOk);
+    lastAgiReply.set(caller, flash.reply);
+    await agiCommand(socket, "HANGUP");
+    socket.end();
+    return;
+  }
+
+  // Dial-a-rate — no account
+  if (forced === "rate" || forced === "dial-rate" || forced === "dialrate") {
+    const rate = await handleDialRate(caller);
+    await speak(socket, rate.reply, voiceOk);
+    lastAgiReply.set(caller, rate.reply);
+    await agiCommand(socket, "HANGUP");
+    socket.end();
+    return;
+  }
+
   const start = await handleCallStart(caller);
 
-  // First call / incomplete setup
   if (start.needsName || start.needsSetPin || start.onboarding) {
     const ready = await runOnboarding(socket, caller, start, voiceOk, forced);
     if (!ready) {
@@ -249,19 +295,18 @@ async function handleAgi(socket: net.Socket) {
       socket.end();
       return;
     }
-    // Onboard done — offer one command on the same call
   } else {
     await speak(socket, start.reply, voiceOk);
     lastAgiReply.set(caller, start.reply);
   }
 
   let text: string;
-  if (forced && /send|pay|transfer|balance|history|help/i.test(forced)) {
-    text = forced;
+  if (forced && /send|pay|transfer|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
+    text = env["agi_arg_1"] || forced;
   } else if (voiceOk) {
     text = await listen(
       socket,
-      "What can I do for you? For example, say: send 5 USDT to a phone number.",
+      "What can I do for you? Send money, set a rule, standing order, or ask the rate.",
       voiceOk,
     );
     if (!text) {
@@ -282,7 +327,6 @@ async function handleAgi(socket: net.Socket) {
   if (result.needsPin) {
     await finishSpendPin(socket, caller, result, voiceOk);
   } else if (result.needsSetPin || result.needsName) {
-    // Rare: drifted mid-call — resume onboard
     await runOnboarding(socket, caller, result, voiceOk, "");
   } else {
     await speak(socket, result.reply, voiceOk);
@@ -302,7 +346,6 @@ export function startAgiServer(port: number) {
       socket.destroy();
     });
   });
-  // Default: all interfaces inside Docker network. Prefer AGI_BIND=127.0.0.1 on host.
   const host = process.env.AGI_BIND ?? "0.0.0.0";
   server.listen(port, host, () => {
     console.log(`hotline.guru FastAGI on ${host}:${port}`);

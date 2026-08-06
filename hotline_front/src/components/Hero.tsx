@@ -11,21 +11,24 @@ const VIDEO_SRC =
 const NAV_LINKS = [
   { label: 'Product', href: '#product' },
   { label: 'Flow', href: '#flow' },
+  { label: 'Features', href: '#features' },
   { label: 'Trust', href: '#trust' },
   { label: 'Roadmap', href: '#roadmap' },
 ] as const
 
 const MARQUEE = [
-  'Global reach',
-  '24 / 7 always on',
+  'Phone is the account',
+  'Spoken policy',
   'Voice + SMS',
-  'USDC on Arc',
-  'Policy by code',
+  'Arc USDC',
+  'Flash for balance',
+  'Pending-claim escrow',
+  'Standing orders',
+  'Savings lock',
+  'x402 agent last mile',
+  'Shop with human approve',
   'No app required',
-  'No bank needed',
   'Feature-phone ready',
-  'Hard spend ceilings',
-  'x402 nanopay',
 ] as const
 
 function scrollToId(id: string) {
@@ -113,7 +116,7 @@ export function Hero() {
               <motion.div className="hero__kicker" variants={fadeUp}>
                 <span className="hero__dot" aria-hidden />
                 <span className="hero__kicker-text">
-                  Phone-native OS for agentic USDC
+                  hotline.guru — phone-native OS for agentic USDC
                 </span>
               </motion.div>
 
@@ -124,8 +127,8 @@ export function Hero() {
               </motion.h1>
 
               <motion.p className="hero__lede" variants={fadeUp}>
-                Dial guru. Speak naturally. Policy decides what can move.
-                Arc settles in USDC — no bank app, no seed phrase, no Uniswap.
+                Dial guru. Speak naturally. Freeze your own rules out loud.
+                Policy decides what can move — Arc settles in USDC.
               </motion.p>
 
               <motion.div className="hero__actions" variants={fadeUp}>
@@ -140,9 +143,9 @@ export function Hero() {
                 <button
                   type="button"
                   className="btn btn--ghost"
-                  onClick={() => scrollToId('ask')}
+                  onClick={() => scrollToId('features')}
                 >
-                  Contact us
+                  Features
                 </button>
               </motion.div>
             </motion.div>

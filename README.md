@@ -21,7 +21,7 @@ npm run start                              # HTTP :8787 + FastAGI :4573
 ### Docker pack (orchestrator + Postgres + Asterisk + STT)
 
 ```bash
-cp .env.example .env   # fill CIRCLE_* for real wallets (else soft-falls to local)
+cp .env.example .env   # fill CIRCLE_* for real wallets; lab may set WALLET_MODE=local
 npm run pack           # docker compose up -d --build
 curl localhost:8787/health?deep=1
 npm run pack:logs
@@ -92,18 +92,21 @@ curl -X POST localhost:8787/v1/message \
 | `balance` / `history` | Check funds / last txs |
 | `send 100 usdt to +1…` | Policy hard-refuse (no PIN) |
 
-Default: full onboard + PIN confirm (`DEMO_SIMPLE=0`). Voice collects PIN via **DTMF**. Unknown payee numbers get a real wallet immediately — when they later onboard, they claim that same wallet (balance already there).
+Default: full onboard + PIN confirm (`DEMO_SIMPLE=0`). Voice collects PIN via **DTMF**. Unknown payee numbers get an **escrow pending claim** (not an unconsented wallet); they receive funds on first onboard, or funds return to sender after expiry.
+
+PIN lockout after repeated failures (`PIN_MAX_FAILS`). Recovery: `RECOVER PIN` → outbound code → `RECOVER CONFIRM <code> <newpin>` with risk cool-down. Change: `CHANGE PIN <old> <new>`.
 
 ## Wallets
 
-- **Default: Circle** developer-controlled wallets on `ARC-TESTNET` (`WALLET_MODE=circle`)
+- **Default: Circle** developer-controlled wallets on **Arc Testnet** (`WALLET_MODE=circle`)
+  - Settlement path proven on Arc testnet; **mainnet pending Circle production credentials**
   - One-time: `npm run circle:register-secret` (needs `CIRCLE_API_KEY`)
   - Then set `CIRCLE_WALLET_SET_ID`; smoke with `npm run circle:smoke`
-  - Default `CIRCLE_ACCOUNT_TYPE=SCA` + Gas Station sponsorship on Arc testnet
-  - Without `CIRCLE_*` creds the process soft-falls back to local EOAs (tests set `WALLET_MODE=local`)
+  - Default `CIRCLE_ACCOUNT_TYPE=SCA` + Gas Station on Arc testnet
+  - **No silent local fallback** — use `WALLET_MODE=local` or lab-only `ALLOW_LOCAL_FALLBACK=1`
 - `WALLET_MODE=local`: encrypted viem EOAs on Arc — Encode lab without Circle console
-- Policy audit export: `GET /v1/audit/policy` (JSON or `?format=csv`); set `AUDIT_EXPORT_TOKEN` in staging
-- Transfers wait for confirmation and return ArcScan links
+- Policy audit is hash-chained (`prev_hash` / `entry_hash`); export: `GET /v1/audit/policy`
+- Transfers wait for confirmation (or `ASYNC_SETTLE=1` for voice-friendly ack) and return ArcScan links
 - Operator Circle **agent** wallet (CLI) still funds demos / optional `MARKETPLACE_LIVE=1` x402
 
 ## Layout
@@ -112,6 +115,7 @@ Default: full onboard + PIN confirm (`DEMO_SIMPLE=0`). Voice collects PIN via **
 orchestrator/     HTTP + FastAGI + CLI + policy/intent/wallets
 telephony/        Asterisk + STT (also pulled into root compose)
 docker-compose.yml  all-in-one pack
+docs/SYSTEM_REVIEW.md
 scripts/smoke-rails.sh
 kb.md             product knowledge base
 DEMO.md           pitch script

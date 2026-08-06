@@ -4,10 +4,11 @@ export type Intent =
   | { action: "set_name"; name: string }
   | { action: "balance" }
   | { action: "deposit" }
-  | { action: "send"; amount: number; to: string }
+  | { action: "send"; amount: number; to: string; memo?: string }
   | { action: "save"; name: string; target: string }
   | { action: "contacts" }
   | { action: "price"; symbol: string }
+  | { action: "rate" }
   | { action: "help" }
   | { action: "confirm"; pin?: string }
   | { action: "cancel" }
@@ -18,6 +19,22 @@ export type Intent =
   | { action: "verify_id"; nationalId: string }
   | { action: "attest_sim" }
   | { action: "identity" }
+  | { action: "report_sim" }
+  | { action: "callback" }
+  | { action: "recover_pin" }
+  | { action: "recover_confirm"; code: string; pin: string }
+  | { action: "change_pin"; oldPin: string; newPin: string }
+  | { action: "set_policy"; spoken: string }
+  | { action: "show_policy" }
+  | { action: "clear_policy" }
+  | { action: "confirm_policy"; pin?: string }
+  | { action: "standing"; amount: number; to: string; cadence: "monthly" | "weekly" }
+  | { action: "list_standing" }
+  | { action: "cancel_standing"; id: number }
+  | { action: "lock_savings"; amount: number; until: string }
+  | { action: "list_locks" }
+  | { action: "shop"; query: string }
+  | { action: "buy"; handleOrIndex: string }
   | { action: "unknown"; raw: string };
 
 /** "send 10 usdt to +1555…" / "pay 5 dollars to this number 555…" / "send 2 to alice.hotline" */
@@ -35,6 +52,23 @@ const WHOIS_RE = /^(?:whois|lookup|resolve)\s+([a-z][a-z0-9.-]{1,40})\s*$/i;
 const VERIFY_RE = /^(?:verify(?:\s+id)?|id)\s+([A-Za-z0-9-]{4,32})\s*$/i;
 const ATTEST_RE = /^(?:attest(?:\s+sim)?|sim\s+attest)\b/i;
 const IDENTITY_RE = /^(?:identity|tier|limits)\b/i;
+const REPORT_SIM_RE = /^(?:report\s+sim(?:\s+change)?|sim\s+swap|port\s+alert)\b/i;
+const CALLBACK_RE = /^(?:callback|call\s+me\s+back|verify\s+callback)\b/i;
+const RECOVER_RE = /^(?:recover(?:\s+pin)?|forgot\s+pin)\b/i;
+const RECOVER_CONFIRM_RE =
+  /^recover\s+confirm\s+(\d{4,8})\s+(\d{4,6})\s*$/i;
+const CHANGE_PIN_RE = /^change\s+pin\s+(\d{4,6})\s+(\d{4,6})\s*$/i;
+const POLICY_SET_RE =
+  /^(?:policy|rule)\s*:?\s*(.+)$/i;
+const POLICY_NEVER_RE =
+  /^never\s+send\b.+/i;
+const STANDING_RE =
+  /(?:send|stand(?:ing)?(?:\s+order)?)\s+(\d+(?:\.\d+)?)\s*(?:usdt|usdc|usd|dollars?)?\s+to\s+([+\w.@-]+)\s+(?:every\s+month|monthly|on\s+the\s+first(?:\s+of\s+every\s+month)?|every\s+week|weekly)/i;
+const LOCK_RE =
+  /(?:lock|save)\s+(\d+(?:\.\d+)?)\s*(?:usdt|usdc|usd|dollars?)?\s+(?:a\s+week\s+)?until\s+(\d{4}-\d{2}-\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)/i;
+const RATE_RE = /^(?:rate|dial\s*a?\s*rate|reference\s+rate|fx\s+rate)\b/i;
+const SHOP_RE = /^(?:shop(?:\s+for)?)\s+(.+)$/i;
+const BUY_RE = /^(?:buy|order|purchase)\s+([a-z0-9][a-z0-9-]{1,60}|\d{1,2})\s*$/i;
 
 function cleanPayee(raw: string): string {
   const t = raw.trim();
@@ -82,13 +116,74 @@ export function parseIntent(text: string): Intent {
   if (named) return { action: "set_name", name: named[1] };
 
   if (/^help\b/i.test(t) || /^commands\b/i.test(t)) return { action: "help" };
+  if (RATE_RE.test(t) || /^(what('s| is)\s+)?(the\s+)?(usd|usdc|dollar)\s+rate\b/i.test(t)) {
+    return { action: "rate" };
+  }
+  const shop = t.match(SHOP_RE);
+  if (shop && !/^shop\s+pay\b/i.test(t)) {
+    return { action: "shop", query: shop[1]!.trim() };
+  }
+  const buy = t.match(BUY_RE);
+  if (buy) return { action: "buy", handleOrIndex: buy[1]!.toLowerCase() };
+  if (/^buy\b/i.test(t) || /^shop\b/i.test(t)) {
+    return { action: "shop", query: t.replace(/^(?:buy|shop)\s+/i, "").trim() || "tee" };
+  }
+
   if (/^balance\b/i.test(t) || /how much.*(have|left)/i.test(t)) return { action: "balance" };
   if (/^deposit\b/i.test(t) || /wallet address/i.test(t)) return { action: "deposit" };
   if (/^contacts\b/i.test(t)) return { action: "contacts" };
   if (/^(history|ledger|txs?|transactions)\b/i.test(t)) return { action: "history" };
 
+  if (/^show\s+policy\b/i.test(t) || /^my\s+rules?\b/i.test(t)) return { action: "show_policy" };
+  if (/^clear\s+policy\b/i.test(t) || /^revoke\s+rules?\b/i.test(t)) {
+    return { action: "clear_policy" };
+  }
+  if (/^confirm\s+policy\b/i.test(t)) {
+    const pin = t.match(/confirm\s+policy\s+(\d{4,6})/i);
+    return { action: "confirm_policy", pin: pin?.[1] };
+  }
+  const policySet = t.match(POLICY_SET_RE);
+  if (policySet) return { action: "set_policy", spoken: policySet[1]!.trim() };
+  if (POLICY_NEVER_RE.test(t)) return { action: "set_policy", spoken: t };
+
+  if (/^list\s+standing\b/i.test(t) || /^standing\s+orders?\b/i.test(t)) {
+    return { action: "list_standing" };
+  }
+  const cancelStand = t.match(/^cancel\s+standing\s+(\d+)\s*$/i);
+  if (cancelStand) return { action: "cancel_standing", id: Number(cancelStand[1]) };
+
+  if (/^list\s+locks?\b/i.test(t) || /^my\s+savings\b/i.test(t)) return { action: "list_locks" };
+
+  const standing = t.match(STANDING_RE);
+  if (standing) {
+    const cadence = /week/i.test(standing[0]!) ? "weekly" : "monthly";
+    return {
+      action: "standing",
+      amount: Number(standing[1]),
+      to: cleanPayee(standing[2]!),
+      cadence,
+    };
+  }
+
+  const lock = t.match(LOCK_RE);
+  if (lock) {
+    return { action: "lock_savings", amount: Number(lock[1]), until: lock[2]!.toLowerCase() };
+  }
+
   if (ATTEST_RE.test(t)) return { action: "attest_sim" };
   if (IDENTITY_RE.test(t)) return { action: "identity" };
+  if (REPORT_SIM_RE.test(t)) return { action: "report_sim" };
+  if (CALLBACK_RE.test(t)) return { action: "callback" };
+  if (RECOVER_RE.test(t) && !/^recover\s+confirm/i.test(t)) return { action: "recover_pin" };
+
+  const recoverConfirm = t.match(RECOVER_CONFIRM_RE);
+  if (recoverConfirm) {
+    return { action: "recover_confirm", code: recoverConfirm[1], pin: recoverConfirm[2] };
+  }
+  const changePin = t.match(CHANGE_PIN_RE);
+  if (changePin) {
+    return { action: "change_pin", oldPin: changePin[1], newPin: changePin[2] };
+  }
 
   const claim = t.match(CLAIM_RE);
   if (claim) return { action: "claim_name", name: claim[1].toLowerCase() };

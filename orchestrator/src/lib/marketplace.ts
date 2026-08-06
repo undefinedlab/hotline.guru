@@ -1,64 +1,38 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { addLedger } from "./db.js";
-
-const execFileAsync = promisify(execFile);
+import {
+  discoverMarketplace,
+  payMarketplaceUrl,
+  resolveAlias,
+  type MarketplaceResult,
+} from "./marketplaceCatalog.js";
 
 const PRICE_URL =
   process.env.PRICE_SERVICE_URL ?? "https://api.aisa.one/apis/v2/coingecko/simple/price";
-const OPERATOR = process.env.OPERATOR_ARC_ADDRESS ?? "";
 
-export type MarketplaceResult = {
-  ok: boolean;
-  summary: string;
-  raw?: unknown;
-  mode: "live" | "public" | "mock";
-};
+export type { MarketplaceResult };
 
-/** Fetch BTC/ETH price — live via circle services pay when possible, else public CoinGecko mock-free fallback. */
+/** Fetch BTC/ETH price — live via circle services pay when possible, else public CoinGecko. */
 export async function fetchCryptoPrice(symbol: string, phone: string): Promise<MarketplaceResult> {
   const id = symbol.toLowerCase();
   const url = `${PRICE_URL}?ids=${encodeURIComponent(id)}&vs_currencies=usd`;
 
-  // Prefer Circle CLI pay (x402) when operator wallet + gateway ready
-  if (process.env.MARKETPLACE_LIVE === "1" && OPERATOR) {
-    try {
-      const chain = process.env.MARKETPLACE_PAY_CHAIN ?? "BASE";
-      const { stdout } = await execFileAsync(
-        "circle",
-        [
-          "services",
-          "pay",
-          url,
-          "--address",
-          OPERATOR,
-          "--chain",
-          chain,
-          "--output",
-          "json",
-        ],
-        { timeout: 60_000, maxBuffer: 2_000_000 },
-      );
-      const parsed = JSON.parse(stdout);
-      await addLedger({
-        phone,
-        kind: "nanopay:price",
-        amount_usdc: 0.008,
-        meta: JSON.stringify({ url, live: true }),
-      });
-      return {
-        ok: true,
-        mode: "live",
-        summary: formatPriceSummary(id, parsed),
-        raw: parsed,
-      };
-    } catch (err) {
-      // fall through to free public endpoint for demo resilience
-      console.warn("circle services pay failed, falling back:", err);
-    }
+  const live = await payMarketplaceUrl({
+    url,
+    phone,
+    method: "GET",
+    kind: "nanopay:price",
+    maxAmount: process.env.X402_MAX_PRICE ?? "0.01",
+  });
+  if (live.ok && live.mode === "live") {
+    return {
+      ok: true,
+      mode: "live",
+      summary: formatPriceSummary(id, live.raw),
+      raw: live.raw,
+      url,
+    };
   }
 
-  // Free public CoinGecko (demo fallback — not x402). Still records nanopay intent ledger at $0.
   try {
     const free = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd`;
     const res = await fetch(free);
@@ -96,37 +70,87 @@ function formatPriceSummary(id: string, parsed: unknown): string {
 }
 
 export async function phoneFraudLookup(phoneNumber: string): Promise<MarketplaceResult> {
-  // BlockRun fraud endpoint requires Gateway on Polygon — mock structure for JOIN soft-check
-  if (process.env.MARKETPLACE_LIVE === "1" && OPERATOR) {
-    try {
-      const url = "https://nano.blockrun.ai/api/v1/phone/lookup/fraud";
-      const { stdout } = await execFileAsync(
-        "circle",
-        [
-          "services",
-          "pay",
-          url,
-          "--address",
-          OPERATOR,
-          "--chain",
-          "MATIC",
-          "-X",
-          "POST",
-          "--data",
-          JSON.stringify({ phoneNumber }),
-          "--output",
-          "json",
-        ],
-        { timeout: 60_000 },
-      );
-      return { ok: true, mode: "live", summary: "Fraud lookup complete", raw: JSON.parse(stdout) };
-    } catch (e) {
-      return { ok: false, mode: "live", summary: `Fraud lookup unavailable: ${String(e)}` };
-    }
+  const { url, method } = resolveAlias("fraud");
+  const live = await payMarketplaceUrl({
+    url,
+    phone: phoneNumber,
+    method,
+    data: { phoneNumber },
+    chain: process.env.FRAUD_PAY_CHAIN ?? "MATIC",
+    kind: "nanopay:fraud",
+    maxAmount: process.env.X402_MAX_FRAUD ?? "0.05",
+  });
+  if (live.ok) {
+    return { ok: true, mode: live.mode, summary: "Fraud lookup complete", raw: live.raw, url };
+  }
+  if (live.mode === "mock") {
+    return {
+      ok: true,
+      mode: "mock",
+      summary: "Fraud lookup skipped (set MARKETPLACE_LIVE=1 + Gateway to enable BlockRun)",
+    };
+  }
+  return { ok: false, mode: live.mode, summary: live.summary, url };
+}
+
+export async function researchQuery(question: string, phone: string): Promise<MarketplaceResult> {
+  const { url, method } = resolveAlias("research");
+  const live = await payMarketplaceUrl({
+    url,
+    phone,
+    method,
+    data: { messages: [{ role: "user", content: question }] },
+    kind: "nanopay:research",
+    maxAmount: process.env.X402_MAX_RESEARCH ?? "0.05",
+  });
+  if (live.ok && live.mode === "live") {
+    const text = extractAnswer(live.raw) ?? live.summary;
+    return { ok: true, mode: "live", summary: text, raw: live.raw, url };
   }
   return {
-    ok: true,
-    mode: "mock",
-    summary: "Fraud lookup skipped (set MARKETPLACE_LIVE=1 + Gateway on Polygon to enable)",
+    ok: false,
+    mode: live.mode,
+    summary:
+      live.mode === "mock"
+        ? `Research needs MARKETPLACE_LIVE=1. Question was: ${question.slice(0, 80)}`
+        : live.summary,
+    url,
   };
 }
+
+export async function outboundMarketplaceCall(opts: {
+  to: string;
+  task: string;
+  phone: string;
+  provider?: "stablephone" | "bland";
+}): Promise<MarketplaceResult> {
+  const alias = opts.provider === "bland" ? "call_bland" : "call";
+  const { url, method } = resolveAlias(alias);
+  const data =
+    alias === "call"
+      ? { phone_number: opts.to, task: opts.task }
+      : { to: opts.to, task: opts.task };
+  return payMarketplaceUrl({
+    url,
+    phone: opts.phone,
+    method,
+    data,
+    kind: "nanopay:call",
+    maxAmount: process.env.X402_MAX_CALL ?? "0.60",
+  });
+}
+
+function extractAnswer(raw: unknown): string | null {
+  try {
+    const s = JSON.stringify(raw);
+    const choices = (raw as { choices?: { message?: { content?: string } }[] })?.choices;
+    if (choices?.[0]?.message?.content) return choices[0].message.content.slice(0, 500);
+    const m = s.match(/"content"\s*:\s*"((?:\\.|[^"\\]){10,400})"/);
+    if (m) return m[1]!.replace(/\\n/g, " ").slice(0, 400);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export { discoverMarketplace, payMarketplaceUrl, resolveAlias };

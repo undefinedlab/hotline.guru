@@ -3,16 +3,18 @@
 ## The demo
 
 **Onboard** → welcome → name → Arc wallet on this number → PIN → thanks  
-**Send** → `send 0.1 usdt to +1555…` → keypad PIN → USDC to **their** phone wallet  
-**New number?** → we create their Arc wallet now; when they call in, it's already theirs  
-**Push limit** → `send 100…` → hard ceiling **refuses**
+**Send** → `send 0.1 usdt to +1555…` → keypad PIN → USDC held for **their** number (escrow pending claim)  
+**New number?** → no wallet until they call in; then escrow releases (or refunds sender after expiry)  
+**Push limit** → `send 100…` → hard ceiling **refuses**  
+**PIN lockout** → wrong PIN repeats → temporary lock (`PIN_MAX_FAILS`)
 
 ## Money loop (don’t burn the faucet)
 
 ```
 faucet / treasury → fund caller
-caller --PIN--> receiver phone wallet (created if needed)
-receiver later onboard (name + PIN) → same wallet, balance waiting
+caller --PIN--> escrow (pending claim for destination MSISDN)
+receiver onboard (name + PIN) → wallet minted → escrow releases
+unclaimed after N days → refund sender
 ```
 
 ```bash
@@ -26,10 +28,24 @@ npm run demo    # onboard → fund → send-to-phone → receiver onboard → re
 npm run telephony && npm run start
 # first call: name + keypad PIN
 # next call: "send 5 usdt to +1…" → keypad PIN
+# optional: ASYNC_SETTLE=1 → "sending now, I'll text you" (no silent hold on the call)
 ```
 
 `DEMO_SIMPLE=0` (default). Set `DEMO_SIMPLE=1` only for one-shot lab skips.
 
-## Pitch
+## Settlement claim (investor-safe)
 
-Call once to open your number. Send to any phone. Policy + PIN before money moves.
+Settlement path proven on **Arc testnet** (Circle DCW / local EOAs).  
+**Mainnet pending Circle production credentials** — do not claim live mainnet USDC until one production transfer is green.
+
+## Demo beats (investor / hackathon)
+
+1. **Spoken leash:** “Never send more than ten dollars to someone I haven't paid before.” → readback → PIN → frozen.  
+2. **Flash balance:** missed call / dial `flash` → SMS balance (zero user cost).  
+3. **Dial-a-rate:** dial `rate` → hear USDC reference, hang up — no account.  
+4. **Voice note:** send → optional memo → payee SMS carries the relationship.  
+5. **Standing / lock:** “send 50 to mom every month” · “lock 5 until December.”  
+6. **B2A:** `POST /v1/x402/ask` or `/call` with `X-Payment: lab` → SMS / StablePhone outbound.  
+7. **Marketplace:** `POST /v1/x402/discover` · `/price` · `/research` · `/proxy`  
+8. **Shop online:** `SHOP tee` / `POST /v1/x402/shop` → `BUY 1` cart link (human pays). Full multi-store: [shop.app/SKILL.md](https://shop.app/SKILL.md) · Circle merch [shop.circle.com/agents.md](https://shop.circle.com/agents.md)
+

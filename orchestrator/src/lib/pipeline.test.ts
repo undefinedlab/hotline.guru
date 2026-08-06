@@ -68,7 +68,7 @@ describe("pipeline full onboard + phone payee", () => {
     assert.match(recall.reply, /Hey Casey/i);
   });
 
-  it("send to unknown number provisions their wallet; they keep it on onboard", async () => {
+  it("send to unknown number opens pending claim — no wallet until they onboard", async () => {
     process.env.DEMO_SIMPLE = "0";
     const sender = "+15559990211";
     const receiver = "+15559990212";
@@ -81,21 +81,14 @@ describe("pipeline full onboard + phone payee", () => {
 
     const pending = await handleMessage(sender, `send 1 usdt to ${receiver}`);
     assert.equal(pending.needsPin, true);
-    assert.equal(pending.data?.provisioned, true);
+    assert.equal(pending.data?.pendingClaim, true);
     assert.equal(pending.data?.toPhone, receiver);
-
-    const recv = await getUser(receiver);
-    assert.ok(recv, "receiver wallet created at send time");
-    assert.equal(recv.name, null);
-    assert.equal(recv.pin_hash, null);
-    const recvAddr = recv.wallet_address;
+    assert.equal(await getUser(receiver), undefined, "no unconsented wallet mint");
 
     const welcome = await handleCallStart(receiver);
     assert.equal(welcome.needsName, true);
-    assert.equal(welcome.data?.address, recvAddr);
     await handleMessage(receiver, "Eve");
     await handleMessage(receiver, "PIN 9999");
-    assert.equal((await getUser(receiver))!.wallet_address, recvAddr);
     assert.equal((await getUser(receiver))!.name, "Eve");
   });
 
@@ -126,5 +119,26 @@ describe("pipeline full onboard + phone payee", () => {
     await handleMessage(phone, "CONFIRM 0000");
     const locked = await handleMessage(phone, "CONFIRM 0000");
     assert.match(locked.reply, /locked|cancelled/i);
+  });
+
+  it("spoken policy compiles, freezes on PIN, then rejects over new-payee cap", async () => {
+    process.env.DEMO_SIMPLE = "0";
+    const phone = "+15559990301";
+    await handleCallStart(phone);
+    await handleMessage(phone, "Helen");
+    await handleMessage(phone, "PIN 4321");
+
+    const draft = await handleMessage(
+      phone,
+      "never send more than ten dollars to someone I haven't paid before",
+    );
+    assert.equal(draft.needsPin, true);
+    assert.match(draft.reply, /ten|10|freeze/i);
+
+    const frozen = await handleMessage(phone, "CONFIRM 4321");
+    assert.match(frozen.reply, /Frozen/i);
+
+    const refused = await handleMessage(phone, "send 15 usdt to +15559990399");
+    assert.match(refused.reply, /Your rule|No —/i);
   });
 });

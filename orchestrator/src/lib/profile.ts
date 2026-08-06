@@ -85,6 +85,9 @@ export function assertProfileConfig(): void {
   if ((process.env.WALLET_MODE ?? "circle") !== "local" && !circleConfigured()) {
     fails.push("CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET + CIRCLE_WALLET_SET_ID");
   }
+  if (process.env.ALLOW_LOCAL_FALLBACK === "1") {
+    fails.push("ALLOW_LOCAL_FALLBACK forbidden outside lab");
+  }
 
   if (fails.length) {
     const msg = `HOTLINE_PROFILE=${hotlineProfile()} refused weak config: ${fails.join("; ")}`;

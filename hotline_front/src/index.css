@@ -28,7 +28,7 @@ body,
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'DM Sans', system-ui, sans-serif;
   background: var(--paper);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
@@ -147,7 +147,8 @@ a {
 }
 
 .section__title {
-  font-weight: 300;
+  font-family: 'Syne', sans-serif;
+  font-weight: 600;
   font-size: clamp(1.9rem, 4.2vw, 2.75rem);
   letter-spacing: -0.035em;
   line-height: 1.06;
