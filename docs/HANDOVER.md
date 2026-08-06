@@ -6,7 +6,7 @@
 **Date:** 2026-08-06  
 **Environment proven:** lab (HTTP + unit tests + optional softphone). Live DID / mainnet not required for core lab path.
 
-Related: [FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md) · [SYSTEM_REVIEW.md](./SYSTEM_REVIEW.md) · [DEMO.md](../DEMO.md) · [README.md](../README.md)
+Related: [CLEAR_DEMO_DID.md](./CLEAR_DEMO_DID.md) · [FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md) · [SYSTEM_REVIEW.md](./SYSTEM_REVIEW.md) · [DEMO.md](../DEMO.md) · [README.md](../README.md)
 
 ---
 

@@ -116,6 +116,7 @@ orchestrator/     HTTP + FastAGI + CLI + policy/intent/wallets
 telephony/        Asterisk + STT (also pulled into root compose)
 docker-compose.yml  all-in-one pack
 docs/HANDOVER.md          features, test results, engineer handover
+docs/CLEAR_DEMO_DID.md    live call→onboard→transfer: providers + gaps
 docs/FUNCTIONALITY_AUDIT.md
 docs/SYSTEM_REVIEW.md
 scripts/smoke-rails.sh
