@@ -93,11 +93,11 @@ Voice / SMS ingress → Intent + policy gate → Circle / Arc wallets → x402 m
 | 01 | Dial | Your number is the account. Login is a ringtone. |
 | 02 | Speak | “Send five dollars to Bob.” Names resolve — not hex. |
 | 03 | Policy | Soft caps, daily limits, hard ceilings. Over-limit = refuse. |
-| 04 | Settle | USDC on Arc (testnet proven; mainnet pending prod Circle creds). Or nanopay x402. |
+| 04 | Settle | USDC on Arc (testnet proven under Circle DCW; Arc has no mainnet yet). Or nanopay x402. |
 
 **Punch line:** P2P is table stakes. Buying the world is the product.  
 **CTA on slide:** “Book a live demo” / “Run the 60s path”
-**Diligence line (footer):** Settlement path proven on Arc testnet · mainnet pending Circle production credentials
+**Diligence line (footer):** Settlement path proven on Arc testnet under Circle developer-controlled wallets · Arc has no public mainnet yet
 
 ---
 
@@ -128,11 +128,11 @@ Voice / SMS ingress → Intent + policy gate → Circle / Arc wallets → x402 m
 | When | Focus |
 |------|--------|
 | **Now** | Voice + SMS · Arc **testnet** USDC · spoken policy · pending-claim · flash balance · dial-a-rate · x402 B2A stub · HotlineNS |
-| **Next** | One mainnet transfer · SIM-change from telco · outbound callback on live trunk · corridor escrow P2P with licensed partner |
+| **Next** | Live inbound DID · SIM-change from telco · outbound callback on live trunk · corridor escrow P2P with licensed partner |
 | **Scale** | WhatsApp · USSD · sell hotline as production x402 · standing worker in compose |
 | **Horizon** | Mesh · World ID · TEE → merchant card |
 
-**Sequencing note:** Cash-in/out (escrow swap) is the business unlock — after mainnet proof + PIN/SIM safety. Airtime-out is spend, not liquidity; do not prioritize early.
+**Sequencing note:** Cash-in/out (escrow swap) is the business unlock — after live DID + PIN/SIM safety. Airtime-out is spend, not liquidity; do not prioritize early.
 
 ---
 

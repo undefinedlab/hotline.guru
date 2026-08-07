@@ -99,7 +99,7 @@ PIN lockout after repeated failures (`PIN_MAX_FAILS`). Recovery: `RECOVER PIN` â
 ## Wallets
 
 - **Default: Circle** developer-controlled wallets on **Arc Testnet** (`WALLET_MODE=circle`)
-  - Settlement path proven on Arc testnet; **mainnet pending Circle production credentials**
+  - Settlement path proven on Arc testnet â€” **Arc has no public mainnet yet**, so testnet is the only network
   - One-time: `npm run circle:register-secret` (needs `CIRCLE_API_KEY`)
   - Then set `CIRCLE_WALLET_SET_ID`; smoke with `npm run circle:smoke`
   - Default `CIRCLE_ACCOUNT_TYPE=SCA` + Gas Station on Arc testnet
