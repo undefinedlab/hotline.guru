@@ -20,6 +20,7 @@ import {
   labHttpApiAllowed,
 } from "./lib/profile.js";
 import { ingressRateLimit } from "./lib/rateLimit.js";
+import { startWorkers } from "./lib/workers.js";
 import {
   createWhatsAppProvider,
   parseWhatsAppWebhook,
@@ -452,3 +453,5 @@ serve({ fetch: app.fetch, port }, () => {
 
 startAgiServer(agiPort);
 log.info("agi listening", { port: agiPort });
+
+startWorkers();

@@ -270,8 +270,6 @@ npm test && docker build -t hotline.guru:local .
 
 - RECOVER PIN / CALLBACK — **outbound call stub**  
 - REPORT SIM cool-down — **manual**, no telco feed  
-- Standing orders — create OK; worker is one-shot CLI, **no cron**  
-- Pending-claim **expiry** — function exists, **not scheduled**  
 - Savings lock — code OK, thin tests  
 - SMS / WA / TG — adapters OK, default **mock**  
 - x402 call / research / fraud / proxy — need `MARKETPLACE_LIVE`  
