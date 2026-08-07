@@ -202,7 +202,7 @@ Full status matrix: [FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md).
 1. Cron sidecar: claim expiry + standing execution  
 2. One funded Circle **testnet** transfer with ArcScan link in console  
 3. Replace CALLBACK / recovery stubs (AMI or Telnyx originate)  
-4. Wire Telnyx US DID → existing `pjsip.telnyx.conf.example` for PSTN demo  
+4. Wire Telnyx/Zadarma US DID → `SIP_*` + `PUBLIC_IP` in `.env` → `npm run trunk` for PSTN demo  
 5. Corridor cash-in/out only after 1–4  
 
 ---

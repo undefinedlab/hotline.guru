@@ -50,4 +50,4 @@ Set in `telephony/.env` or compose: `WHISPER_MODEL=base.en`.
 
 ## Production trunk
 
-Same as before — Zadarma/Telnyx in `asterisk/pjsip.conf`, `EXTERNAL_IP`, forward UDP 5060 + RTP.
+Same as before — Zadarma/Telnyx via `SIP_*` + `PUBLIC_IP` in `.env` → `npm run trunk`, forward UDP 5060 + RTP.

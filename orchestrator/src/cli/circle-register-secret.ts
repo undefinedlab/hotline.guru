@@ -24,7 +24,8 @@ async function main() {
 
   const envPath = path.resolve(process.cwd(), ".env");
   const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
-  if (/^CIRCLE_ENTITY_SECRET=/m.test(existing)) {
+  // .env.example ships an empty CIRCLE_ENTITY_SECRET= line — only a real value blocks.
+  if (/^CIRCLE_ENTITY_SECRET=.+$/m.test(existing)) {
     console.error("CIRCLE_ENTITY_SECRET already set in .env — refusing to overwrite.");
     console.error("Rotate via Circle Console + recovery file if compromised.");
     process.exit(1);
@@ -50,7 +51,15 @@ async function main() {
     console.warn("No recoveryFile in response — download from Circle Console if offered.");
   }
 
-  fs.appendFileSync(envPath, `\nCIRCLE_ENTITY_SECRET=${entitySecret}\n`);
+  // Fill the placeholder line in place, else append — never leave two of the same key.
+  if (/^CIRCLE_ENTITY_SECRET=\s*$/m.test(existing)) {
+    fs.writeFileSync(
+      envPath,
+      existing.replace(/^CIRCLE_ENTITY_SECRET=\s*$/m, `CIRCLE_ENTITY_SECRET=${entitySecret}`),
+    );
+  } else {
+    fs.appendFileSync(envPath, `\nCIRCLE_ENTITY_SECRET=${entitySecret}\n`);
+  }
   console.log("Registered. CIRCLE_ENTITY_SECRET appended to .env");
   console.log("Store the recovery file separately. Never commit .env or recovery/.");
 }

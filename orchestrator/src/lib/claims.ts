@@ -13,8 +13,10 @@ import {
   normalizePhone,
   sumPendingClaimsToday,
   type PendingClaim,
+  type User,
 } from "./db.js";
-import { ensureWallet, transferUsdc } from "./wallets.js";
+import { ensureWallet, transferUsdc, getUsdcBalance } from "./wallets.js";
+import { circleGasStationEnabled } from "./circle.js";
 import { log, shortHash } from "./log.js";
 
 export const ESCROW_ACCOUNT = () =>
@@ -40,6 +42,28 @@ export async function escrowAddress(): Promise<Address> {
   if (configured && isAddress(configured)) return configured as Address;
   const u = await ensureEscrowWallet();
   return u.wallet_address as Address;
+}
+
+/**
+ * Arc charges gas in USDC, so an escrow that received exactly N can never forward N —
+ * the transfer reverts and each retry burns more gas. Pay what is actually there.
+ * Both payout paths (fulfill + expire refund) route through escrowPayable.
+ */
+export function escrowGasReserve(): number {
+  const n = Number(process.env.ESCROW_GAS_RESERVE_USDC ?? 0.005);
+  return Number.isFinite(n) && n >= 0 ? n : 0.005;
+}
+
+/** Pure: what can actually be sent. USDC is 6dp — floor so we never exceed the balance. */
+export function payableAmount(want: number, balance: number, reserve: number): number {
+  return Math.floor(Math.min(want, balance - reserve) * 1e6) / 1e6;
+}
+
+async function escrowPayable(escrow: User, want: number): Promise<number> {
+  // Circle Gas Station sponsors gas, so the balance is not eaten by fees.
+  const sponsored = escrow.wallet_ref.startsWith("circle:") && circleGasStationEnabled();
+  const balance = await getUsdcBalance(escrow.wallet_address as Address, escrow.wallet_ref);
+  return payableAmount(want, balance, sponsored ? 0 : escrowGasReserve());
 }
 
 export async function assertCanOpenPendingClaim(fromPhone: string): Promise<void> {
@@ -96,20 +120,25 @@ export async function fulfillPendingClaimsFor(payeePhone: string): Promise<numbe
   if (!held.length) return 0;
   const user = await getUser(phone);
   if (!user) return 0;
-  await ensureEscrowWallet();
+  const escrow = await ensureEscrowWallet();
   let n = 0;
   for (const c of held) {
     try {
+      const pay = await escrowPayable(escrow, c.amount_usdc);
+      if (pay <= 0) {
+        log.warn("pending claim underfunded — left held", { claimId: c.id, want: c.amount_usdc });
+        continue;
+      }
       const { txHash } = await transferUsdc({
         fromPhone: ESCROW_ACCOUNT(),
         toAddress: user.wallet_address as Address,
-        amountUsdc: c.amount_usdc,
+        amountUsdc: pay,
       });
       await markPendingClaim(c.id, "claimed", txHash);
       await addLedger({
         phone,
         kind: "escrow_claim",
-        amount_usdc: c.amount_usdc,
+        amount_usdc: pay,
         counterparty: c.from_phone,
         tx_hash: txHash,
         meta: JSON.stringify({ claimId: c.id }),
@@ -127,7 +156,7 @@ export async function fulfillPendingClaimsFor(payeePhone: string): Promise<numbe
 export async function expirePendingClaims(now = new Date()): Promise<number> {
   const { listExpiredHeldClaims } = await import("./db.js");
   const expired = await listExpiredHeldClaims(now.toISOString());
-  await ensureEscrowWallet();
+  const escrow = await ensureEscrowWallet();
   let n = 0;
   for (const c of expired) {
     try {
@@ -136,16 +165,21 @@ export async function expirePendingClaims(now = new Date()): Promise<number> {
         await markPendingClaim(c.id, "expired");
         continue;
       }
+      const pay = await escrowPayable(escrow, c.amount_usdc);
+      if (pay <= 0) {
+        log.warn("expired claim underfunded — left held", { claimId: c.id, want: c.amount_usdc });
+        continue;
+      }
       const { txHash } = await transferUsdc({
         fromPhone: ESCROW_ACCOUNT(),
         toAddress: sender.wallet_address as Address,
-        amountUsdc: c.amount_usdc,
+        amountUsdc: pay,
       });
       await markPendingClaim(c.id, "refunded", txHash);
       await addLedger({
         phone: c.from_phone,
         kind: "escrow_refund",
-        amount_usdc: c.amount_usdc,
+        amount_usdc: pay,
         counterparty: c.to_phone,
         tx_hash: txHash,
         meta: JSON.stringify({ claimId: c.id }),

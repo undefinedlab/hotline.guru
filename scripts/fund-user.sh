@@ -7,10 +7,13 @@ cd "$(dirname "$0")/.."
 PHONE="${1:?phone required}"
 AMOUNT="${2:-0.5}"
 
+# Caller's DATABASE_PATH must win over .env — demo-flow.sh points us at its own DB.
+_CALLER_DB="${DATABASE_PATH:-}"
 if [[ -f .env ]]; then set -a; # shellcheck disable=SC1091
   source .env
   set +a
 fi
+[[ -n "$_CALLER_DB" ]] && export DATABASE_PATH="$_CALLER_DB"
 
 bash scripts/ensure-funds.sh "$AMOUNT" || true
 
@@ -29,7 +32,8 @@ const amount = Number(process.env.AMOUNT!);
 const lab = loadOrCreateLabWallets();
 
 let user = getUser(phone);
-if (!user) user = await ensureWallet(phone, "lab");
+// Partial row (onboard crashed mid-way) has no wallet yet — don't hand undefined to viem.
+if (!user?.wallet_address) user = await ensureWallet(phone, "lab");
 if (!user.name) setUserName(phone, "Lab");
 if (!user.pin_hash) setPin(phone, hashPin(process.env.DEMO_PIN ?? "1234"));
 

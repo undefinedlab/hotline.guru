@@ -140,7 +140,7 @@ App-owned name registry — **not** a gap vs ArcNS:
 | Telegram | `tg:<chatId>` | `POST /webhooks/telegram` |
 | Lab HTTP | any account | `POST /v1/message` (gated; see security) |
 
-Live DID still needs a Telnyx (or other) trunk: see `telephony/asterisk/pjsip.telnyx.conf.example`.  
+Live DID still needs a Telnyx / Zadarma trunk: set `SIP_*` + `PUBLIC_IP` in `.env` → `npm run trunk`.  
 Readiness without secrets: `GET /v1/channels` (auth outside lab).
 
 ---

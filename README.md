@@ -58,7 +58,7 @@ Set `SMS_PROVIDER=telnyx` or `africas_talking` in `.env`. Webhooks:
 - `GET|POST /webhooks/whatsapp` — Meta Cloud API
 - `POST /webhooks/telegram` — Bot API
 
-Default providers are `mock`. **Live DID/trunk** still needs accounts: copy `telephony/asterisk/pjsip.telnyx.conf.example` into `pjsip.conf`, set `INBOUND_DID`, and run with `HOTLINE_PROFILE=staging` + `WEBHOOK_VERIFY=1`. Check readiness: `GET /v1/channels`.
+Default providers are `mock`. **Live DID/trunk** still needs an account: set `SIP_USER` / `SIP_PASSWORD` / `SIP_TRUNK_HOST` (`sip.telnyx.com` or `pbx.zadarma.com`) / `PUBLIC_IP` / `INBOUND_DID` in `.env`, then `npm run trunk` generates `telephony/asterisk/pjsip.conf` (gitignored — never commit it). `npm run pack` and `npm run telephony` do this for you. Run public with `HOTLINE_PROFILE=staging` + `WEBHOOK_VERIFY=1`. Check readiness: `GET /v1/channels`.
 
 ## Ops
 
