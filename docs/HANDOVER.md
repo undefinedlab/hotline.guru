@@ -36,7 +36,7 @@ Legend: **WORKS** lab-ready · **PARTIAL** code/stub · **BLOCKED** needs ops/cr
 |---------|--------|-------|
 | Onboard (name + PIN → wallet on MSISDN) | WORKS | Pipeline + AGI + lab HTTP |
 | Send to known payee | WORKS | PIN confirm; `WALLET_MODE=local` or Circle |
-| Pending-claim escrow (unknown MSISDN) | PARTIAL | Hold + fulfill on onboard; **no scheduled expiry cron** |
+| Pending-claim escrow (unknown MSISDN) | WORKS | Hold, fulfill on onboard, expiry refund on the worker timer |
 | Hard ceiling refuse (no PIN dance) | WORKS | Policy gate |
 | Circle DCW (no silent local fallback) | WORKS | Explicit `WALLET_MODE=local` or `ALLOW_LOCAL_FALLBACK=1` |
 | Async settle ack (`ASYNC_SETTLE=1`) | PARTIAL | Voice-friendly; thin automated coverage |
@@ -73,7 +73,7 @@ Legend: **WORKS** lab-ready · **PARTIAL** code/stub · **BLOCKED** needs ops/cr
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Standing orders create / list / cancel | PARTIAL | `npm run standing` one-shot — **no compose cron** |
+| Standing orders create / list / cancel | WORKS | Run by the in-process worker; `npm run standing` for one-shot |
 | Savings lock | PARTIAL | Works in code; thin E2E tests |
 | Shop search (Circle merch) | WORKS | Public Shopify JSON |
 | Buy → cart link (human pays) | WORKS | Never auto-checkout |
@@ -199,7 +199,7 @@ Full status matrix: [FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md).
 
 ## 7. Suggested next work (priority)
 
-1. Cron sidecar: claim expiry + standing execution  
+1. ~~Cron sidecar~~ — done: in-process workers (`WORKERS_INTERVAL_MIN`)  
 2. One funded Circle **testnet** transfer with ArcScan link in console  
 3. Replace CALLBACK / recovery stubs (AMI or Telnyx originate)  
 4. Wire Telnyx/Zadarma US DID → `SIP_*` + `PUBLIC_IP` in `.env` → `npm run trunk` for PSTN demo  

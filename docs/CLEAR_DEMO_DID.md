@@ -94,7 +94,7 @@ Code already routes trunk + softphone into the same AGI (`telephony/asterisk/ext
 |-------|--------|
 | Onboard → PIN → wallet on phone | WORKS |
 | Send + PIN confirm + hard ceiling | WORKS |
-| Pending-claim escrow for unknown payee | WORKS (expiry cron not scheduled) |
+| Pending-claim escrow for unknown payee | WORKS (expiry refund on the worker timer) |
 | FastAGI + softphone + STT pack | WORKS |
 | Asterisk dialplan for inbound trunk | WORKS (`from-trunk`) |
 | Telnyx / Zadarma SIP config | WORKS — `npm run trunk` generates it from `.env` (gitignored) |

@@ -37,7 +37,7 @@ Legend:
 | Onboard (name + PIN) | **WORKS** | `pipeline.ts`, `pipeline.test.ts`, AGI | Lab HTTP / softphone / SMS |
 | Hard ceiling refuse | **WORKS** | `policy.ts`, tests | Nothing special |
 | Phone send → known payee | **WORKS** | `pipeline.ts`, `wallets.ts` | Funded sender (`WALLET_MODE=local` + fund, or Circle) |
-| Pending-claim escrow (unknown MSISDN) | **PARTIAL** | `claims.ts`, `contacts.ts`, tests | Hold + fulfill-on-onboard work; **`expirePendingClaims` has no cron** |
+| Pending-claim escrow (unknown MSISDN) | **WORKS** | `claims.ts`, `workers.ts`, tests | Hold, fulfill-on-onboard, and scheduled expiry refund |
 | Circle DCW (no silent local fallback) | **WORKS** | `circle.ts` `resolveWalletMode` | `CIRCLE_*` or explicit `WALLET_MODE=local` / `ALLOW_LOCAL_FALLBACK=1` |
 | Async settle ack | **PARTIAL** | `ASYNC_SETTLE` in `pipeline.ts` | Env flag; no dedicated test |
 | Hash-chained `policy_audit` | **WORKS** | `db.ts` `recordPolicyDecision` | Export needs `AUDIT_EXPORT_TOKEN` outside open lab |
@@ -80,7 +80,7 @@ Legend:
 
 | Feature | Status | Evidence | What you need |
 |---------|--------|----------|---------------|
-| Standing order create / list / cancel | **PARTIAL** | `retention.ts`, `pipeline.ts` | Create works; **`npm run standing` is one-shot — no compose cron** |
+| Standing order create / list / cancel | **WORKS** | `retention.ts`, `workers.ts` | Executed on the worker timer; `npm run standing` still runs it once |
 | Savings lock | **PARTIAL** | `retention.ts`, policy gate | Works in code; thin test coverage; unlock on read |
 | Shop search (Circle merch) | **WORKS** | `shop.ts`, `x402.test.ts` | Public Shopify JSON |
 | Buy → cart link (human pays) | **WORKS** | `shop.ts`, x402 `buy` | Never auto-completes (correct) |
@@ -151,7 +151,7 @@ Lab payment: `X-Payment: lab` (or `X402_LAB_FREE=1`).
 
 ## Suggested next engineering (priority)
 
-1. Wire **claim expiry** + **standing** to a compose cron sidecar  
+1. ~~Wire claim expiry + standing to a cron sidecar~~ — done in `workers.ts`  
 2. One **funded Circle testnet** transfer proof in your console  
 3. Replace CALLBACK / recovery stubs with AMI/Telnyx originate  
 4. Fix `.env.example` soft-fallback wording  
