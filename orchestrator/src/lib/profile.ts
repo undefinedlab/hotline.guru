@@ -120,7 +120,7 @@ export function channelStatus() {
     voice: {
       didHint: process.env.INBOUND_DID ? "[set]" : null,
       trunk: process.env.SIP_TRUNK_HOST ? "[set]" : null,
-      note: "Fill telephony/asterisk/pjsip.telnyx.conf.example when DID is provisioned",
+      note: "Set SIP_USER/SIP_PASSWORD/SIP_TRUNK_HOST/PUBLIC_IP in .env, then npm run trunk",
     },
     whatsapp: {
       provider: process.env.WHATSAPP_PROVIDER ?? "mock",

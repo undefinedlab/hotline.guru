@@ -59,6 +59,8 @@ services:
       DEMO_PIN: ${DEMO_PIN:-1234}
       WEBHOOK_VERIFY: ${WEBHOOK_VERIFY:-0}
       AUDIT_EXPORT_TOKEN: ${AUDIT_EXPORT_TOKEN:-}
+      INBOUND_DID: ${INBOUND_DID:-}
+      SIP_TRUNK_HOST: ${SIP_TRUNK_HOST:-}
     volumes:
       - ./data:/app/data
       - ./telephony/shared:/shared

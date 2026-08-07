@@ -4,7 +4,7 @@
 
 **Not the goal:** A German/UK/India *local* DID, mainnet, cash-in/out, or a polished operator UI. Reachability is international PSTN into one number, not one DID per country.
 
-Related: [HANDOVER.md](./HANDOVER.md) · [DEMO.md](../DEMO.md) · [telephony/README.md](../telephony/README.md) · `telephony/asterisk/pjsip.telnyx.conf.example`
+Related: [HANDOVER.md](./HANDOVER.md) · [DEMO.md](../DEMO.md) · [telephony/README.md](../telephony/README.md) · `scripts/setup-trunk.sh`
 
 ---
 
@@ -49,8 +49,8 @@ Prefer a **US local** DID so **UK, India, Germany, and anyone else** dial the sa
 
 | Provider | Number KYC | Fits this repo | Reachable from UK / IN / DE | Notes |
 |----------|------------|----------------|-----------------------------|-------|
-| **Telnyx** (recommended) | US/CA: **none** for the number | `pjsip.telnyx.conf.example` + SMS webhooks | Yes on US local | Account may need payment / verification to order US from EU |
-| **Zadarma** | US: passport + address | Generic SIP in `pjsip.conf` | Yes on US local | Skip DE numbers; reuse existing trunk if still live |
+| **Telnyx** (recommended) | US/CA: **none** for the number | `npm run trunk` (SIP_TRUNK_HOST=sip.telnyx.com) + SMS webhooks | Yes on US local | Account may need payment / verification to order US from EU |
+| **Zadarma** | US: passport + address | `npm run trunk` (SIP_TRUNK_HOST=pbx.zadarma.com) | Yes on US local | Skip DE numbers; reuse existing trunk if still live |
 | **Twilio** Elastic SIP | Trial can get US number fast | Not pre-wired | Yes on US local | Fine alternative; more Asterisk work |
 | **German / UK local DID** | Heavy / local-address docs | Same SIP once approved | Local callers only (others still intl) | **Wrong for speed**; does not improve “anyone can call” |
 
@@ -97,7 +97,7 @@ Code already routes trunk + softphone into the same AGI (`telephony/asterisk/ext
 | Pending-claim escrow for unknown payee | WORKS (expiry cron not scheduled) |
 | FastAGI + softphone + STT pack | WORKS |
 | Asterisk dialplan for inbound trunk | WORKS (`from-trunk`) |
-| Telnyx SIP example config | Example only (no real creds in git) |
+| Telnyx / Zadarma SIP config | WORKS — `npm run trunk` generates it from `.env` (gitignored) |
 | Arc **testnet** defaults in `.env.example` | WORKS |
 | Circle DCW path / local EOA path | WORKS when configured |
 | Unit tests (52) for pipeline/policy | PASS |
@@ -108,7 +108,7 @@ Code already routes trunk + softphone into the same AGI (`telephony/asterisk/ext
 |-----|---------------|------------|
 | **Public host** for Asterisk | SIP/RTP must reach the internet | VPS (or home with public IP + port forward). Open **UDP 5060** + **UDP 10000–10099** |
 | **Buy + activate US DID** | No public number yet | Telnyx Mission Control → Voice → buy US local → attach to SIP connection |
-| **Wire SIP credentials** | Example file not live | Copy `pjsip.telnyx.conf.example` → `pjsip.conf`; set `EXTERNAL_*` to public IP; **do not commit secrets** |
+| **Wire SIP credentials** | `.env` has no `SIP_*` yet | Set `SIP_USER` / `SIP_PASSWORD` / `SIP_TRUNK_HOST` / `PUBLIC_IP` → `npm run trunk`. Generated `pjsip.conf` is gitignored — **secrets never enter git** |
 | **Set `INBOUND_DID`** | Ops awareness / channel status | `.env`: `INBOUND_DID=+1…` |
 | **Funded sender wallet** | Transfer fails if empty | Circle: `npm run circle:smoke` + fund testnet USDC **or** `WALLET_MODE=local` + `npm run funds` / `fund-user` |
 | **Orchestrator reachable from Asterisk** | AGI host | Compose pack **or** `PHONE_AGI_HOST` pointing at orchestrator |
@@ -144,7 +144,7 @@ Code already routes trunk + softphone into the same AGI (`telephony/asterisk/ext
 - [ ] Buy **US local** voice number (not toll-free)  
 - [ ] Create SIP connection / credentials → note user/pass  
 - [ ] Point DID → that connection; origination toward your Asterisk public IP:5060  
-- [ ] Merge example into `telephony/asterisk/pjsip.conf` (external signaling/media = public IP)  
+- [ ] `SIP_*` + `PUBLIC_IP` in `.env` → `npm run trunk` (writes external signaling/media = public IP)  
 - [ ] Restart Asterisk; confirm registration in Telnyx portal / Asterisk logs  
 - [ ] Set `INBOUND_DID=+1…` in `.env`  
 
@@ -172,7 +172,11 @@ Code already routes trunk + softphone into the same AGI (`telephony/asterisk/ext
 ```bash
 # Voice / DID
 INBOUND_DID=+1XXXXXXXXXX
-# SIP secrets live in pjsip.conf only — not committed
+SIP_TRUNK_HOST=sip.telnyx.com   # or pbx.zadarma.com
+SIP_USER=
+SIP_PASSWORD=
+PUBLIC_IP=                      # public IPv4 of the Asterisk host
+# then: npm run trunk   (writes gitignored telephony/asterisk/pjsip.conf)
 
 # Money — Arc testnet (default URLs already correct)
 ARC_RPC_URL=https://rpc.testnet.arc.network
