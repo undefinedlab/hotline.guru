@@ -3,7 +3,7 @@
 **Date:** 2026-08-06  
 **Scope:** Code + unit tests (`52` pass, `0` fail) vs investor/demo claims.  
 **Handover:** See [HANDOVER.md](./HANDOVER.md) for full feature inventory + test suite breakdown.  
-**Verdict:** Strong **lab / Arc testnet** product spine. Several “shipped” items are stubs or need ops. Cash-in/out and mainnet are not built.
+**Verdict:** Strong **lab / Arc testnet** product spine. Several “shipped” items are stubs or need ops. Cash-in/out is not built; mainnet does not exist on Arc yet.
 
 Legend:
 
@@ -25,7 +25,7 @@ Legend:
 | BLOCKED on ops | ~5 |
 | MISSING | ~3 |
 
-**Safe claim:** Settlement path proven on Arc **testnet**; mainnet pending Circle production credentials.  
+**Safe claim:** Settlement path proven on Arc **testnet** — Arc has no public mainnet yet, so testnet is the only network.  
 **Unsafe claim:** Live mainnet USDC · cash-in/out · telco-native identity.
 
 ---
@@ -41,7 +41,7 @@ Legend:
 | Circle DCW (no silent local fallback) | **WORKS** | `circle.ts` `resolveWalletMode` | `CIRCLE_*` or explicit `WALLET_MODE=local` / `ALLOW_LOCAL_FALLBACK=1` |
 | Async settle ack | **PARTIAL** | `ASYNC_SETTLE` in `pipeline.ts` | Env flag; no dedicated test |
 | Hash-chained `policy_audit` | **WORKS** | `db.ts` `recordPolicyDecision` | Export needs `AUDIT_EXPORT_TOKEN` outside open lab |
-| Mainnet USDC | **BLOCKED** | Arc testnet chain in config | Prod Circle + mainnet env |
+| Mainnet USDC | **N/A** | Arc testnet chain in config | Arc has no public mainnet — out of scope, not a gap |
 | Cash-in / cash-out corridor swap | **MISSING** | Docs only | Partner + product build |
 
 ---

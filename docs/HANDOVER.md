@@ -4,7 +4,7 @@
 **Repo:** https://github.com/undefinedlab/hotline.guru  
 **Branch at write-up:** `main` (`eef5740` + later)  
 **Date:** 2026-08-06  
-**Environment proven:** lab (HTTP + unit tests + optional softphone). Live DID / mainnet not required for core lab path.
+**Environment proven:** lab (HTTP + unit tests + softphone stack) **and the deployment shape** — Docker pack, Postgres driver, `HOTLINE_PROFILE=staging`, Circle DCW on Arc testnet. Live inbound DID is the remaining gap; Arc has no public mainnet.
 
 Related: [CLEAR_DEMO_DID.md](./CLEAR_DEMO_DID.md) · [FUNCTIONALITY_AUDIT.md](./FUNCTIONALITY_AUDIT.md) · [SYSTEM_REVIEW.md](./SYSTEM_REVIEW.md) · [DEMO.md](../DEMO.md) · [README.md](../README.md)
 
@@ -21,7 +21,7 @@ Call or text an agent. The phone number **is** the account. Spends **USDC on Arc
 | Circle DCW or local Arc EOAs | Money |
 | x402 marketplace / shop | Agent spend surface |
 
-**Safe investor claim:** Settlement path proven on **Arc testnet**. Mainnet pending Circle production credentials.  
+**Safe investor claim:** Settlement path proven on **Arc testnet** under Circle developer-controlled custody. Arc has no public mainnet yet — testnet is the only network.  
 **Do not claim:** live mainnet USDC, telco-native SIM-swap, corridor cash-in/out, unattended production standing-order workers.
 
 ---
@@ -41,7 +41,7 @@ Legend: **WORKS** lab-ready · **PARTIAL** code/stub · **BLOCKED** needs ops/cr
 | Circle DCW (no silent local fallback) | WORKS | Explicit `WALLET_MODE=local` or `ALLOW_LOCAL_FALLBACK=1` |
 | Async settle ack (`ASYNC_SETTLE=1`) | PARTIAL | Voice-friendly; thin automated coverage |
 | Hash-chained `policy_audit` | WORKS | Export token outside open lab |
-| Mainnet USDC | BLOCKED | Prod Circle + mainnet env |
+| Mainnet USDC | N/A | Arc has no public mainnet — out of scope |
 | Cash-in / cash-out corridor | MISSING | Docs-only |
 
 ### Policy & identity

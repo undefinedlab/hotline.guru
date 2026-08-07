@@ -14,7 +14,7 @@ This document describes what is built today, how the pieces connect, and what is
 |-----------|-----------------|
 | Telephony = UI | Voice (Asterisk + FastAGI), SMS, WhatsApp, Telegram — no wallet app required |
 | Policy = leash | Soft / daily / hard caps by identity tier; refusal is a feature |
-| Circle / Arc = money | Default custody is Circle DCW on **Arc Testnet** (SCA + Gas Station). Mainnet pending prod credentials. |
+| Circle / Arc = money | Default custody is Circle DCW on **Arc Testnet** (SCA + Gas Station). Arc has no public mainnet yet. |
 | x402 = spend | Optional live marketplace pay; public price fallback otherwise |
 | No own token | USDC only; spoken “USDT” maps to USDC on Arc |
 | LLM never authorizes | Intent parsing may be smart later; `evaluatePolicy` + PIN gate money |
@@ -83,7 +83,7 @@ This document describes what is built today, how the pieces connect, and what is
 4. Transfers: Circle API → poll to COMPLETE (or `ASYNC_SETTLE` ack) → ArcScan link.
 5. Smoke: `npm run circle:smoke`.
 
-**Investor-safe claim:** Settlement path proven on Arc testnet; mainnet pending Circle production credentials.
+**Investor-safe claim:** Settlement path proven on Arc testnet. Arc has no public mainnet yet — testnet is the only network available, so this is the strongest claim the chain permits.
 
 ### Fallback: local EOAs (explicit only)
 
@@ -183,7 +183,7 @@ Readiness without secrets: `GET /v1/channels` (auth outside lab).
 | Custody | No silent Circle→local downgrade |
 | Async settle | `ASYNC_SETTLE=1` ack-then-text for voice |
 
-**Still open:** live telco SIM-change feed, real outbound callback on trunk, corridor cash-in/out escrow swap, one **mainnet** Circle transfer proof, Redis rate limits.
+**Still open:** live telco SIM-change feed, real outbound callback on trunk, corridor cash-in/out escrow swap, Redis rate limits.
 
 ---
 
@@ -284,7 +284,6 @@ npm test && docker build -t hotline.guru:local .
 
 ### Missing
 
-1. One real **mainnet** transfer (so the claim is unqualified).  
 2. Live SIM-change from telco + real outbound callback.  
 3. Corridor **cash-in/out** escrow swap with a licensed partner.  
 4. Operator / product UI (frontend is pitch site only).  

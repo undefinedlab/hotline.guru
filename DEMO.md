@@ -36,7 +36,7 @@ npm run telephony && npm run start
 ## Settlement claim (investor-safe)
 
 Settlement path proven on **Arc testnet** (Circle DCW / local EOAs).  
-**Mainnet pending Circle production credentials** — do not claim live mainnet USDC until one production transfer is green.
+**Arc has no public mainnet yet** — testnet is the only network there is. Mainnet is out of scope until Arc ships one; do not claim live mainnet USDC.
 
 ## Demo beats (investor / hackathon)
 
