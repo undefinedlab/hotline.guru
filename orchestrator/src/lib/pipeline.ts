@@ -155,7 +155,7 @@ function firstName(user: User | null | undefined): string | null {
 
 function withName(user: User | null | undefined, body: string): string {
   const n = firstName(user);
-  return n ? `Hey ${n} — ${body}` : body;
+  return n ? `Hey ${n}. ${body}` : body;
 }
 
 function isOnboarded(user: User): boolean {
@@ -164,10 +164,28 @@ function isOnboarded(user: User): boolean {
   return !!user.pin_hash;
 }
 
+/**
+ * Chat users reply with just the digits — "3973" — because we asked for a PIN.
+ * Voice never hits this: the AGI collects DTMF and sends "PIN 3973" itself.
+ * Without this, bare digits match no intent and the caller loops on the prompt.
+ */
+async function expandBarePin(phone: string, text: string): Promise<string> {
+  const digits = text.trim();
+  if (!/^\d{4,6}$/.test(digits)) return text;
+  const pending = await getPending<AnyPending>(phone);
+  // A name prompt is the one place digits are not a PIN.
+  if (pending && pending.type !== "awaiting_name") return `CONFIRM ${digits}`;
+  if (pending) return text;
+  const user = await getUser(phone);
+  if (user && !isOnboarded(user)) return `PIN ${digits}`;
+  return text;
+}
+
 export async function handleMessage(phoneRaw: string, text: string): Promise<HandleResult> {
   const phone = normalizePhone(phoneRaw);
-  const intent = await parseIntentSmart(text);
-  return dispatch(phone, intent, text);
+  const effective = await expandBarePin(phone, text);
+  const intent = await parseIntentSmart(effective);
+  return dispatch(phone, intent, effective);
 }
 
 export async function handleCallStart(phoneRaw: string): Promise<HandleResult> {
@@ -182,7 +200,7 @@ export async function handleMissedCall(phoneRaw: string): Promise<HandleResult> 
   const user = await getUser(phone);
   if (!user?.wallet_address || !isOnboarded(user)) {
     const reply =
-      "hotline.guru: flash received. Call back and say your name to open your number — then flash again for balance.";
+      "hotline.guru: flash received. Call back and say your name to open your number, then flash again for balance.";
     if (canReceiveSms(phone)) void sms.send(phone, reply).catch(() => {});
     return { reply, guest: true, data: { flash: true, onboarded: false } };
   }
@@ -198,7 +216,7 @@ export async function handleDialRate(phoneRaw?: string): Promise<HandleResult> {
   const phone = phoneRaw ? normalizePhone(phoneRaw) : "guest:rate";
   const price = await fetchCryptoPrice("usd-coin", phone);
   const reply = price.ok
-    ? `Reference: ${price.summary}. Free dial-a-rate — hang up anytime. Open an account to send.`
+    ? `Reference: ${price.summary}. Free rate check, no account needed. Open an account to send.`
     : `Rate lookup busy. Try again shortly.`;
   return { reply, guest: true, data: { mode: price.mode, rate: true } };
 }
@@ -229,7 +247,7 @@ async function continueOnboardOrGreet(phone: string, user: User): Promise<Handle
 
   if (!isOnboarded(user)) {
     return {
-      reply: `Welcome back, ${firstName(user)}. Finish setup — choose a 4-digit PIN on the keypad, then pound.`,
+      reply: `Welcome back, ${firstName(user)}. Finish setup: choose a 4-digit PIN.`,
       needsSetPin: true,
       onboarding: true,
       data: { onboard: true, name: user.name, address: user.wallet_address },
@@ -261,7 +279,7 @@ async function finishNaming(phone: string, rawName: string): Promise<HandleResul
 
   await setPending(phone, null);
   return {
-    reply: `Nice to meet you, ${firstName(user)}. Your Arc wallet is ready.${nsHint} Choose a 4-digit PIN on the keypad, then pound.`,
+    reply: `Nice to meet you, ${firstName(user)}. Your Arc wallet is ready.${nsHint} Choose a 4-digit PIN.`,
     needsSetPin: true,
     onboarding: true,
     data: { name: user.name, address: dep.address, onboard: true, suggestHotline: suggest },
@@ -276,7 +294,7 @@ async function completePinSetup(phone: string, pin: string): Promise<HandleResul
   await setPending(phone, null);
 
   const reply = fresh.name
-    ? `Thanks, ${firstName(fresh)}. You're all set on this number. Call anytime to send USDC to another phone number.`
+    ? `Thanks, ${firstName(fresh)}. You're all set on this number. You can now send USDC to any phone number.`
     : "PIN set. You're ready.";
 
   const claimed = await fulfillPendingClaimsFor(phone);
@@ -309,7 +327,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     const bare = parseNameAnswer(raw);
     if (bare) return finishNaming(phone, bare);
     return {
-      reply: "Just tell me your first name — for example, Ben.",
+      reply: "Just tell me your first name, for example Ben.",
       needsName: true,
       onboarding: true,
     };
@@ -364,7 +382,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "recover_pin") {
     const user = await ensureCaller(phone);
     if (!user.pin_hash) {
-      return { reply: withName(user, "No PIN yet — finish onboarding first.") };
+      return { reply: withName(user, "No PIN yet, finish onboarding first.") };
     }
     const code = String(randomInt(100000, 999999));
     const hash = createHash("sha256").update(`hotline:recover:${phone}:${code}`).digest("hex");
@@ -491,7 +509,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       return {
         reply: withName(
           user,
-          `Frozen. ${describeRules(pending.rules)} The model can't loosen this — only you can CLEAR POLICY.`,
+          `Frozen. ${describeRules(pending.rules)} The model can't loosen this, only you can CLEAR POLICY.`,
         ),
         data: { rules: pending.rules },
       };
@@ -577,7 +595,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
         (demoSimple() ? demoPin() : undefined);
       if (!pin) {
         return {
-          reply: "Enter your PIN on the keypad, or say yes and your PIN.",
+          reply: "Send your PIN to confirm.",
           needsPin: true,
         };
       }
@@ -612,7 +630,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     const pin = (intent.action === "confirm" ? intent.pin : undefined) ?? (demoSimple() ? demoPin() : undefined);
     if (!pin) {
       return {
-        reply: "Enter your PIN on the keypad, or say yes and your PIN.",
+        reply: "Send your PIN to confirm.",
         needsPin: true,
       };
     }
@@ -682,7 +700,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `I heard: ${describeRules(rules)} Confirm with your PIN to freeze it — then even I can't loosen it.`,
+        `I heard: ${describeRules(rules)} Confirm with your PIN to freeze it, then even I can't loosen it.`,
       ),
       needsPin: true,
       data: { draftRules: rules },
@@ -747,7 +765,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "lock_savings") {
     const until = parseUnlockDate(intent.until);
     if (!until) {
-      return { reply: withName(user, "Say LOCK 5 until December — or LOCK 5 until 2026-12-01.") };
+      return { reply: withName(user, "Say LOCK 5 until December, or LOCK 5 until 2026-12-01.") };
     }
     const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
     const avail = await availableUsdc(phone, bal);
@@ -797,7 +815,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Shop: ${short}. Say BUY 1 or BUY ${hit.products[0]?.handle ?? "handle"} — I'll text a cart link (you approve payment). Full Shop skill: ${shopSkillUrl()}`,
+        `Shop: ${short}. Say BUY 1 or BUY ${hit.products[0]?.handle ?? "handle"}, I'll text a cart link (you approve payment). Full Shop skill: ${shopSkillUrl()}`,
       ),
       data: { products: hit.products, skill: hit.skillHint },
     };
@@ -842,7 +860,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Cart for ${product.title} ($${product.price}). Open the link I texted to pay — agents never auto-complete. ${checkout ?? product.url}`,
+        `Cart for ${product.title} ($${product.price}). Open the link I texted to pay, agents never auto-complete. ${checkout ?? product.url}`,
       ),
       data: {
         product,
@@ -861,7 +879,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     try {
       const { label } = await claimName(phone, intent.name);
       return {
-        reply: withName(user, `You're ${label}. People can send to that name — no hex.`),
+        reply: withName(user, `You're ${label}. People can send to that name, no hex.`),
         data: { hotline: label },
       };
     } catch (e) {
@@ -1029,7 +1047,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       intent,
     });
     if (verdict.status === "reject") {
-      return { reply: withName(user, `No — ${verdict.reason}`) };
+      return { reply: withName(user, `No. ${verdict.reason}`) };
     }
     if (verdict.status === "callback") {
       return { reply: withName(user, verdict.reason) };
@@ -1058,7 +1076,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Confirm send ${intent.amount} USDC to ${payee.label}? Enter your PIN on the keypad, then pound.${claimHint}`,
+        `Confirm send ${intent.amount} USDC to ${payee.label}? Send your PIN to confirm.${claimHint}`,
       ),
       needsPin: true,
       needsMemo: !intent.memo,
@@ -1084,7 +1102,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       intent,
     });
     if (verdict.status === "reject") {
-      return { reply: withName(user, `No — ${verdict.reason}`) };
+      return { reply: withName(user, `No. ${verdict.reason}`) };
     }
 
     const estimate = await estimateArcSwap({
@@ -1115,7 +1133,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quote} Enter your PIN on the keypad, then pound.`,
+        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quote} Send your PIN to confirm.`,
       ),
       needsPin: true,
       data: {
@@ -1248,8 +1266,8 @@ async function executeSend(
     }
     if (pending.toPhone && canReceiveSms(pending.toPhone)) {
       const payeeMsg = pending.memoText
-        ? `Voice note from hotline: "${pending.memoText.slice(0, 160)}". Then: you received ${pending.amount} USDC — call hotline.guru to claim.`
-        : `You have ${pending.amount} USDC waiting on hotline.guru — call the hotline to claim.`;
+        ? `Voice note from hotline: "${pending.memoText.slice(0, 160)}". Then: you received ${pending.amount} USDC, call hotline.guru to claim.`
+        : `You have ${pending.amount} USDC waiting on hotline.guru, call the hotline to claim.`;
       void sms.send(pending.toPhone, payeeMsg).catch(() => {});
     }
     log.info("send ok", { phone, to: where, amount: pending.amount, txHash, explorer });
@@ -1261,7 +1279,7 @@ async function executeSend(
     return {
       reply: withName(
         u,
-        `Sending ${pending.amount} USDC to ${pending.toLabel} now — I'll text you when it lands. You can hang up.`,
+        `Sending ${pending.amount} USDC to ${pending.toLabel} now. I'll let you know when it lands.`,
       ),
       data: { async: true, idemKey, to: pending.toLabel },
     };
@@ -1362,7 +1380,7 @@ async function executeSwap(
     return {
       reply: withName(
         u,
-        `Swapping ${pending.amount} ${spokenToken(pending.tokenIn)} to ${spokenToken(pending.tokenOut)} now — I'll text you when it lands. You can hang up.`,
+        `Swapping ${pending.amount} ${spokenToken(pending.tokenIn)} to ${spokenToken(pending.tokenOut)} now. I'll let you know when it lands.`,
       ),
       data: { async: true, idemKey },
     };
@@ -1376,7 +1394,7 @@ async function executeSwap(
     return {
       reply: withName(
         u,
-        `Couldn't swap: ${err}. Need ${spokenToken(pending.tokenIn)} in the wallet — and a KIT_KEY for Circle Swap on Arc.`,
+        `Couldn't swap: ${err}. Need ${spokenToken(pending.tokenIn)} in the wallet, and a KIT_KEY for Circle Swap on Arc.`,
       ),
     };
   }
@@ -1390,7 +1408,7 @@ export async function attachSendMemo(phoneRaw: string, memoText: string): Promis
     pending.memoText = memoText.slice(0, 280);
     await setPending(phone, pending);
     return {
-      reply: "Got your voice note — it'll ride with the payment.",
+      reply: "Got your voice note, it'll ride with the payment.",
       data: { memo: pending.memoText },
     };
   }

@@ -35,7 +35,7 @@ describe("pipeline", () => {
     await handleMessage("+15559990011", "Alex");
 
     const bad = await handleMessage("+15559990011", "send 100 usdt to +15559990012");
-    assert.match(bad.reply, /Hard ceiling|No —/i);
+    assert.match(bad.reply, /Hard ceiling|No./i);
   });
 });
 
@@ -68,7 +68,7 @@ describe("pipeline full onboard + phone payee", () => {
     assert.match(recall.reply, /Hey Casey/i);
   });
 
-  it("send to unknown number opens pending claim — no wallet until they onboard", async () => {
+  it("send to unknown number opens pending claim, no wallet until they onboard", async () => {
     process.env.DEMO_SIMPLE = "0";
     const sender = "+15559990211";
     const receiver = "+15559990212";
@@ -101,7 +101,7 @@ describe("pipeline full onboard + phone payee", () => {
 
     const bad = await handleMessage(phone, "send 100 usdt to +15559990222");
     assert.equal(bad.needsPin, undefined);
-    assert.match(bad.reply, /Hard ceiling|No —/i);
+    assert.match(bad.reply, /Hard ceiling|No./i);
   });
 
   it("locks PIN after repeated failures", async () => {
@@ -139,6 +139,6 @@ describe("pipeline full onboard + phone payee", () => {
     assert.match(frozen.reply, /Frozen/i);
 
     const refused = await handleMessage(phone, "send 15 usdt to +15559990399");
-    assert.match(refused.reply, /Your rule|No —/i);
+    assert.match(refused.reply, /Your rule|No./i);
   });
 });
