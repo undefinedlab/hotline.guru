@@ -42,6 +42,8 @@ export function normalizeTranscript(raw: string): string {
   // Prefer dollar/euro wording for swaps (STT often butchers "USDC" / "swap" / "euro")
   t = t.replace(/\b(swapped|swop|spot|slap|slop|swat|swap)\b/g, "swap");
   t = t.replace(/\b(trade|trading)\b/g, "exchange");
+  t = t.replace(/\b(topup|top\-up)\b/g, "top up");
+  t = t.replace(/\b(air time|air\-time)\b/g, "airtime");
   t = t.replace(/\beurope\b/g, "euro");
   t = t.replace(/\busdc\b/g, "dollar");
   t = t.replace(/\busdt\b/g, "dollar");

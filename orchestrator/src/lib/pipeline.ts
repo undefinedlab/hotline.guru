@@ -60,6 +60,7 @@ import {
 } from "./wallets.js";
 import { estimateArcSwap, executeArcSwap, getTokenBalance } from "./swap.js";
 import { spokenToken, type SwapToken } from "./tokens.js";
+import { buildAirtimeQuote, fulfillAirtime } from "./airtime.js";
 import { log, shortHash } from "./log.js";
 import {
   cartCheckoutUrl,
@@ -121,6 +122,16 @@ type PendingSwap = {
   idemKey?: string;
 };
 
+type PendingTopup = {
+  type: "topup";
+  faceAmount: number;
+  faceCurrency: "EUR" | "USD";
+  chargeUsdc: number;
+  msisdn: string;
+  productLabel: string;
+  idemKey?: string;
+};
+
 type PendingName = { type: "awaiting_name" };
 type PendingPolicy = { type: "awaiting_policy_confirm"; rules: FrozenRule[] };
 type PendingStanding = {
@@ -145,6 +156,7 @@ type AnyPending =
   | PendingName
   | PendingSend
   | PendingSwap
+  | PendingTopup
   | PendingPolicy
   | PendingStanding
   | PendingLock
@@ -597,6 +609,41 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       return executeSwap(phone, pending, user);
     }
 
+    if (pending?.type === "topup") {
+      if (!isOnboarded(user)) {
+        return continueOnboardOrGreet(phone, user);
+      }
+      if (isPinLocked(user)) {
+        return {
+          reply: withName(
+            user,
+            `PIN locked after too many tries. Try again after ${user.pin_locked_until}.`,
+          ),
+        };
+      }
+      const pin =
+        (intent.action === "confirm" ? intent.pin : undefined) ??
+        (demoSimple() ? demoPin() : undefined);
+      if (!pin) {
+        return {
+          reply: "Enter your PIN on the keypad, or say yes and your PIN.",
+          needsPin: true,
+        };
+      }
+      if (!verifyPin(user, pin)) {
+        const updated = await recordPinFailure(phone, pinMaxFails(), pinLockMinutes());
+        if (isPinLocked(updated)) {
+          await setPending(phone, null);
+          return {
+            reply: withName(updated, "Too many wrong PINs. Top-up cancelled. PIN locked for a while."),
+          };
+        }
+        return { reply: "Wrong PIN. Try again.", needsPin: true };
+      }
+      await clearPinFailures(phone);
+      return executeTopup(phone, pending, user);
+    }
+
     if (!pending || pending.type !== "send") {
       return { reply: "Nothing pending to confirm." };
     }
@@ -661,7 +708,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
 
   if (intent.action === "help" || intent.action === "unknown") {
     const tip =
-      "Try saying balance, send one dollar to a phone number, exchange one dollar to euro, or price of bitcoin.";
+      "Try saying balance, send one dollar, exchange one dollar to euro, or buy ten euro airtime.";
     return {
       reply: withName(
         user,
@@ -1141,6 +1188,63 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     };
   }
 
+  if (intent.action === "topup") {
+    const msisdn = intent.to ? normalizePhone(intent.to) : phone;
+    const quote = buildAirtimeQuote({
+      faceAmount: intent.amount,
+      faceCurrency: intent.currency,
+      msisdn,
+    });
+    const verdict = await evaluatePolicy(phone, intent);
+    await recordPolicyDecision({
+      phone,
+      action: "topup",
+      verdict: verdict.status,
+      reason: "reason" in verdict ? verdict.reason : undefined,
+      amount_usdc: quote.chargeUsdc,
+      payee: msisdn,
+      intent,
+    });
+    if (verdict.status === "reject") {
+      return { reply: withName(user, `No — ${verdict.reason}`) };
+    }
+
+    const pendingTopup: PendingTopup = {
+      type: "topup",
+      faceAmount: quote.faceAmount,
+      faceCurrency: quote.faceCurrency,
+      chargeUsdc: quote.chargeUsdc,
+      msisdn: quote.msisdn,
+      productLabel: quote.productLabel,
+      idemKey: `topup:${phone}:${randomUUID()}`,
+    };
+
+    if (demoSimple()) {
+      return executeTopup(phone, pendingTopup, user);
+    }
+
+    await setPending(phone, pendingTopup);
+    const face =
+      quote.faceCurrency === "EUR"
+        ? `${quote.faceAmount} euro`
+        : `${quote.faceAmount} dollars`;
+    return {
+      reply: withName(
+        user,
+        `Confirm ${face} airtime for ${quote.msisdn}? Costs about ${quote.chargeUsdc} USDC.`,
+      ),
+      spoken: withName(
+        user,
+        `Confirm ${face} airtime for your number? About ${quote.chargeUsdc} dollars.`,
+      ),
+      needsPin: true,
+      data: {
+        ...quote,
+        idemKey: pendingTopup.idemKey,
+      },
+    };
+  }
+
   return { reply: "Unhandled." };
 }
 
@@ -1397,6 +1501,115 @@ async function executeSwap(
         u,
         `Couldn't swap: ${err}. Need ${spokenToken(pending.tokenIn)} in the wallet — and a KIT_KEY for Circle Swap on Arc.`,
       ),
+    };
+  }
+}
+
+async function executeTopup(
+  phone: string,
+  pending: PendingTopup,
+  user?: User | null,
+): Promise<HandleResult> {
+  const u = user ?? (await getUser(phone));
+  const idemKey =
+    pending.idemKey ??
+    `topup:${phone}:${pending.msisdn}:${pending.faceAmount}:${pending.faceCurrency}`;
+
+  const claim = await claimIdempotency<HandleResult>(idemKey, phone);
+  if (claim.status === "completed") {
+    return claim.result;
+  }
+  if (claim.status === "inflight") {
+    return {
+      reply: withName(u, "That top-up is already in progress. Check HISTORY in a moment."),
+    };
+  }
+
+  const asyncMode =
+    process.env.ASYNC_SETTLE === "1" ||
+    (process.env.ASYNC_SETTLE === "voice" && process.env.HOTLINE_VOICE === "1");
+
+  const run = async (): Promise<HandleResult> => {
+    const fulfilled = await fulfillAirtime({
+      fromPhone: phone,
+      quote: {
+        faceAmount: pending.faceAmount,
+        faceCurrency: pending.faceCurrency,
+        chargeUsdc: pending.chargeUsdc,
+        msisdn: pending.msisdn,
+        provider: (process.env.AIRTIME_PROVIDER ?? "mock").toLowerCase(),
+        productLabel: pending.productLabel,
+      },
+    });
+    await addLedger({
+      phone,
+      kind: "airtime",
+      amount_usdc: pending.chargeUsdc,
+      counterparty: pending.msisdn,
+      tx_hash: fulfilled.txHash,
+      meta: JSON.stringify({
+        faceAmount: pending.faceAmount,
+        faceCurrency: pending.faceCurrency,
+        voucherId: fulfilled.voucherId,
+        productLabel: pending.productLabel,
+      }),
+    });
+    await setPending(phone, null);
+
+    const face =
+      pending.faceCurrency === "EUR"
+        ? `${pending.faceAmount} euro`
+        : `${pending.faceAmount} dollars`;
+    const result: HandleResult = {
+      reply: withName(
+        u,
+        `Topped up ${face} airtime for ${pending.msisdn}. Voucher ${fulfilled.voucherId}.${fulfilled.explorer ? ` ${fulfilled.explorer}` : ""}`,
+      ),
+      spoken: withName(
+        u,
+        `Done. ${face} airtime is on the way to your number.`,
+      ),
+      data: {
+        voucherId: fulfilled.voucherId,
+        txHash: fulfilled.txHash,
+        explorer: fulfilled.explorer,
+        msisdn: pending.msisdn,
+        chargeUsdc: pending.chargeUsdc,
+        idemKey,
+      },
+    };
+    await saveIdempotentResult(idemKey, phone, result);
+    if (canReceiveSms(phone)) {
+      void sms.send(phone, result.reply).catch(() => {});
+    }
+    if (pending.msisdn !== phone && canReceiveSms(pending.msisdn)) {
+      void sms
+        .send(
+          pending.msisdn,
+          `hotline.guru: ${face} airtime top-up from ${phone}. Voucher ${fulfilled.voucherId}.`,
+        )
+        .catch(() => {});
+    }
+    return result;
+  };
+
+  if (asyncMode) {
+    void run().catch((e) => log.error("async topup failed", { err: String(e), phone }));
+    return {
+      reply: withName(u, `Buying airtime now — I'll text you when it's done.`),
+      spoken: withName(u, `Buying airtime now — I'll text you when it's done.`),
+      data: { async: true, idemKey },
+    };
+  }
+
+  try {
+    return await run();
+  } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    log.error("topup failed", { phone, err });
+    return {
+      reply: withName(u, `Couldn't top up: ${err}. Need USDC in the wallet.`),
+      spoken: withName(u, `Couldn't top up. Check your dollar balance.`),
     };
   }
 }

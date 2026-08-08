@@ -8,6 +8,7 @@ export type Intent =
   | { action: "deposit" }
   | { action: "send"; amount: number; to: string; memo?: string }
   | { action: "swap"; amount: number; tokenIn: SwapToken; tokenOut: SwapToken }
+  | { action: "topup"; amount: number; currency: "EUR" | "USD"; to?: string }
   | { action: "save"; name: string; target: string }
   | { action: "contacts" }
   | { action: "price"; symbol: string }
@@ -85,6 +86,19 @@ const SWAP_SHORT_RE = new RegExp(
   `(?:swap|exchange|convert|change)\\s+(${SWAP_AMT})\\s+(?:to|for|into)\\s+(${TOKEN_WORD})\\b`,
   "i",
 );
+/**
+ * Airtime:
+ *  "top up 10 euro airtime"
+ *  "buy 5 dollars airtime for +353…"
+ *  "airtime 10 euro"
+ *  "reload 5 airtime on this number"
+ */
+const TOPUP_RE =
+  /(?:(?:top\s*up|buy|get|reload|purchase)\s+)?(\d+(?:\.\d+)?|a|an)\s*(euro|euros|eur|dollar|dollars|usd|usdc|bucks?)?\s*(?:of\s+)?airtime(?:\s+(?:for|to|on)\s+(.+))?/i;
+const TOPUP_ALT_RE =
+  /(?:top\s*up|reload|recharge)\s+(\d+(?:\.\d+)?|a|an)\s*(euro|euros|eur|dollar|dollars|usd|usdc)?(?:\s+(?:for|to|on)\s+(.+))?/i;
+const TOPUP_LEAD_RE =
+  /^airtime\s+(\d+(?:\.\d+)?|a|an)\s*(euro|euros|eur|dollar|dollars|usd|usdc|bucks?)?(?:\s+(?:for|to|on)\s+(.+))?/i;
 
 function cleanPayee(raw: string): string {
   const t = raw.trim();
@@ -135,6 +149,27 @@ export function parseIntent(text: string): Intent {
   if (RATE_RE.test(t) || /^(what('s| is)\s+)?(the\s+)?(usd|usdc|dollar)\s+rate\b/i.test(t)) {
     return { action: "rate" };
   }
+
+  const topupEarly =
+    t.match(TOPUP_LEAD_RE) ||
+    t.match(TOPUP_RE) ||
+    (/airtime|top\s*up|reload|recharge/i.test(t) ? t.match(TOPUP_ALT_RE) : null);
+  if (topupEarly) {
+    const amount = (() => {
+      const s = topupEarly[1]!.toLowerCase();
+      if (s === "a" || s === "an") return 1;
+      return Number(topupEarly[1]);
+    })();
+    const curRaw = (topupEarly[2] ?? "euro").toLowerCase();
+    const currency: "EUR" | "USD" = /dollar|usd|usdc|buck/.test(curRaw) ? "USD" : "EUR";
+    const toRaw = topupEarly[3]?.trim();
+    const to =
+      toRaw && !/^(this|my|the)\s+number$/i.test(toRaw) ? cleanPayee(toRaw) : undefined;
+    if (amount > 0) {
+      return { action: "topup", amount, currency, to };
+    }
+  }
+
   const shop = t.match(SHOP_RE);
   if (shop && !/^shop\s+pay\b/i.test(t)) {
     return { action: "shop", query: shop[1]!.trim() };

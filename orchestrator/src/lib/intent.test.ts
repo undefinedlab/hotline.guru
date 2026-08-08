@@ -69,6 +69,27 @@ describe("parseIntent", () => {
     assert.equal(parseIntent("sim swap").action, "report_sim");
   });
 
+  it("parses airtime top-up", () => {
+    assert.deepEqual(parseIntent("buy 10 euro airtime"), {
+      action: "topup",
+      amount: 10,
+      currency: "EUR",
+      to: undefined,
+    });
+    assert.deepEqual(parseIntent("top up 5 dollars airtime for +353899494966"), {
+      action: "topup",
+      amount: 5,
+      currency: "USD",
+      to: "+353899494966",
+    });
+    assert.deepEqual(parseIntent("airtime 10 euro"), {
+      action: "topup",
+      amount: 10,
+      currency: "EUR",
+      to: undefined,
+    });
+  });
+
   it("normalizes spoken usdc into dollar swap", async () => {
     const { normalizeTranscript } = await import("./stt.js");
     const n = normalizeTranscript("swap one USDC to euro");

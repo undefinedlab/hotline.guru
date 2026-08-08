@@ -194,7 +194,7 @@ async function runOnboarding(
 
   if (current.needsName) {
     let nameText = "";
-    if (forced && !/send|pay|transfer|swap|exchange|convert|pin/i.test(forced)) {
+    if (forced && !/send|pay|transfer|swap|exchange|convert|top\s*up|airtime|reload|pin/i.test(forced)) {
       nameText = forced;
     } else if (voiceOk) {
       for (let attempt = 0; attempt < 3 && !nameText; attempt++) {
@@ -364,7 +364,7 @@ async function handleAgi(socket: net.Socket) {
   }
 
   let text: string;
-  if (forced && /send|pay|transfer|swap|exchange|convert|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
+  if (forced && /send|pay|transfer|swap|exchange|convert|top\s*up|airtime|reload|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
     text = env["agi_arg_1"] || forced;
     const result = await handleMessage(caller, text);
     if (result.needsPin) {
@@ -384,7 +384,7 @@ async function handleAgi(socket: net.Socket) {
         if (turn === 0) {
           await speak(
             socket,
-            "I didn't catch that. Try saying exchange one dollar to euro.",
+            "I didn't catch that. Try saying exchange one dollar to euro, or buy ten euro airtime.",
             voiceOk,
           );
           continue;
