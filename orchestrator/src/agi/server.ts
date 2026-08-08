@@ -383,7 +383,7 @@ async function handleAgi(socket: net.Socket) {
         if (turn === 0) {
           await speak(
             socket,
-            "I didn't catch that. Try saying balance, send one dollar, or swap one dollar to euro.",
+            "I didn't catch that. Try saying exchange one dollar to euro.",
             voiceOk,
           );
           continue;

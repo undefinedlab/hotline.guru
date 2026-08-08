@@ -26,4 +26,22 @@ describe("normalizeTranscript", () => {
     assert.equal(n, "swap 1 dollar to euro");
     assert.equal(parseIntent(n).action, "swap");
   });
+
+  it("repairs real Whisper mishears from the Irish DID", () => {
+    const a = normalizeTranscript("slap $1 to era");
+    assert.match(a, /swap 1 dollar to euro/);
+    assert.equal(parseIntent(a).action, "swap");
+
+    const b = normalizeTranscript("so, what, 1 dollar to you?");
+    assert.match(b, /swap 1 dollar to euro/);
+    assert.equal(parseIntent(b).action, "swap");
+
+    const c = normalizeTranscript("exchange one dollar for euro");
+    assert.deepEqual(parseIntent(c), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
+  });
 });
