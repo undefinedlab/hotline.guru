@@ -63,3 +63,22 @@ describe("parseIntent", () => {
     assert.deepEqual(parseIntent("I'm Alex"), { action: "set_name", name: "Alex" });
   });
 });
+
+describe("telegram slash commands", () => {
+  it("parses like plain text", () => {
+    // "/start" is the first message every Telegram user sends.
+    assert.equal(parseIntent("/start").action, "hello");
+    assert.equal(parseIntent("/start@hotlinegurubot").action, "hello", "group form carries a bot suffix");
+    assert.equal(parseIntent("/help").action, "help");
+    assert.equal(parseIntent("/balance").action, parseIntent("balance").action);
+
+    // Arguments must survive the strip.
+    assert.deepEqual(
+      parseIntent("/send 5 usdt to +15551230002"),
+      parseIntent("send 5 usdt to +15551230002"),
+    );
+
+    // A bare slash is not a command — falls through to the command list, not a greeting.
+    assert.equal(parseIntent("/").action, "unknown");
+  });
+});

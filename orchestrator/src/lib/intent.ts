@@ -109,8 +109,18 @@ export function parseNameAnswer(text: string): string | null {
   return null;
 }
 
+/**
+ * Telegram sends slash commands — "/start", "/balance", "/start@hotlinegurubot"
+ * in groups. Strip the slash and the bot suffix so they hit the normal parser;
+ * "/start" is the first thing every Telegram user sends.
+ */
+function stripSlashCommand(text: string): string {
+  const m = text.trim().match(/^\/([a-z0-9_]+)(?:@[a-z0-9_]+)?(\s[\s\S]*)?$/i);
+  return m ? `${m[1]}${m[2] ?? ""}`.trim() : text.trim();
+}
+
 export function parseIntent(text: string): Intent {
-  const t = text.trim();
+  const t = stripSlashCommand(text);
   if (!t) return { action: "hello" };
 
   if (/^(hi|hello|hey|start)\s*[!.]*$/i.test(t)) return { action: "hello" };
