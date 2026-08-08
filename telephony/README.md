@@ -2,7 +2,7 @@
 
 Pattern adapted from [PTCIP](https://github.com/NOVA-privacy-first/PTCIP) — **no Twilio**.
 
-Speech: **faster-whisper** (`tiny.en` on CPU) + **espeak-ng** TTS.
+Speech: **faster-whisper** (`small.en` on CPU by default) + Piper / espeak TTS.
 
 ## Start
 
@@ -11,7 +11,7 @@ From repo root or `telephony/`:
 ```bash
 cd telephony
 docker compose up -d --build
-# first boot downloads the whisper model (~75MB for tiny.en) — wait for healthy
+# first boot downloads the whisper model (~500MB for small.en) — wait for healthy
 curl -s localhost:8090/health
 ```
 
@@ -41,12 +41,14 @@ bash scripts/smoke-stt.sh
 
 ## Models
 
-| Env | Default | Notes |
-|-----|---------|--------|
-| `WHISPER_MODEL` | `tiny.en` | Fast CPU lab |
-| | `base.en` | Better accuracy, slower |
+| `WHISPER_MODEL` | Rough size | On a 4GB CPU VPS |
+|-----------------|------------|------------------|
+| `tiny.en` | ~75MB | Fast, often mangles telephony |
+| `base.en` | ~140MB | Next step up, still light |
+| `small.en` | ~500MB | **Default** — best skill/cost for voice |
+| `medium.en` | ~1.5GB | Slow + RAM-hungry without GPU — skip here |
 
-Set in `telephony/.env` or compose: `WHISPER_MODEL=base.en`.
+Set in `.env`: `WHISPER_MODEL=small.en`.
 
 ## Production trunk
 

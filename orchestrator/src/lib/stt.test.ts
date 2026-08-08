@@ -43,5 +43,13 @@ describe("normalizeTranscript", () => {
       tokenIn: "USDC",
       tokenOut: "EURC",
     });
+
+    const d = normalizeTranscript("clumps for 1 dollar to james");
+    assert.match(d, /^send 1 dollar to james/);
+    assert.equal(parseIntent(d).action, "send");
+
+    const e = normalizeTranscript("stand 1 dollar to plus 353899494966");
+    assert.match(e, /send 1 dollar to \+353/);
+    assert.equal(parseIntent(e).action, "send");
   });
 });

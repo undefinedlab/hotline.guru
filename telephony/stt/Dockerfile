@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 
-ENV WHISPER_MODEL=tiny.en
+ENV WHISPER_MODEL=small.en
 ENV WHISPER_DEVICE=cpu
 ENV WHISPER_COMPUTE=int8
 ENV SHARED_DIR=/shared

@@ -42,8 +42,14 @@ export function normalizeTranscript(raw: string): string {
   // Prefer dollar/euro wording for swaps (STT often butchers "USDC" / "swap" / "euro")
   t = t.replace(/\b(swapped|swop|spot|slap|slop|swat|swap)\b/g, "swap");
   t = t.replace(/\b(trade|trading)\b/g, "exchange");
+  // Whisper: send → clumps / stand / sand / scent (keep "standing" for standing orders)
+  t = t.replace(/\b(clumps?|clamps?|clump|clamp|sand|scent)\b/g, "send");
+  t = t.replace(/\bsent\b/g, "send");
+  t = t.replace(/\bstand(?!ing)\b/g, "send");
   t = t.replace(/\b(topup|top\-up)\b/g, "top up");
   t = t.replace(/\b(air time|air\-time)\b/g, "airtime");
+  // Whisper: airtime → anytime / our time / heir time
+  t = t.replace(/\b(anytime|any\s*time|our\s*time|heir\s*time|air\s*times?)\b/g, "airtime");
   t = t.replace(/\beurope\b/g, "euro");
   t = t.replace(/\busdc\b/g, "dollar");
   t = t.replace(/\busdt\b/g, "dollar");
@@ -52,6 +58,13 @@ export function normalizeTranscript(raw: string): string {
   t = t.replace(/\bto\s+(era|arrow|uro|yuro|you|your|oreo)\b/g, "to euro");
   t = t.replace(/\bfor\s+(era|arrow|uro|yuro|you|your|oreo)\b/g, "for euro");
   t = t.replace(/\binto\s+(era|arrow|uro|yuro|you|your|oreo)\b/g, "into euro");
+  // "send 1 dollar for james" → "send 1 dollar to james"
+  t = t.replace(
+    /\b(send|pay|transfer)\s+(\d+(?:\.\d+)?)\s+(dollars?|euros?|usdc|usdt)\s+for\s+/g,
+    "$1 $2 $3 to ",
+  );
+  // "clumps for 1 dollar to james" → "send for 1 dollar…" → drop stray "for"
+  t = t.replace(/\b(send|pay|transfer)\s+for\s+(\d+)/g, "$1 $2");
 
   const words: Record<string, string> = {
     zero: "0",

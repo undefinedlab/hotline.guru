@@ -128,6 +128,10 @@ describe("telegram slash commands", () => {
       parseIntent("/send 5 usdt to +15551230002"),
       parseIntent("send 5 usdt to +15551230002"),
     );
+    assert.deepEqual(
+      parseIntent("/buy 10 euro airtime"),
+      parseIntent("buy 10 euro airtime"),
+    );
 
     // A bare slash is not a command — falls through to the command list, not a greeting.
     assert.equal(parseIntent("/").action, "unknown");

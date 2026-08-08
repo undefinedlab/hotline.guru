@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from faster_whisper import WhisperModel
 
-MODEL_NAME = os.environ.get("WHISPER_MODEL", "tiny.en")
+MODEL_NAME = os.environ.get("WHISPER_MODEL", "small.en")
 DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
 COMPUTE = os.environ.get("WHISPER_COMPUTE", "int8")
 SHARED = Path(os.environ.get("SHARED_DIR", "/shared"))
