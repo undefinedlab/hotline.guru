@@ -120,6 +120,10 @@ rewrite_contact=yes
 EOF
 } >"$OUT"
 
+# Asterisk (non-root) must write recordings under the shared volume.
+mkdir -p telephony/shared
+chmod 1777 telephony/shared 2>/dev/null || true
+
 if [ -n "$SIP_TRUNK_HOST" ]; then
   echo "wrote $OUT — trunk $SIP_TRUNK_HOST as $SIP_USER${PUBLIC_IP:+ (public $PUBLIC_IP)}"
 else

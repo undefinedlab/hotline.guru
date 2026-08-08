@@ -1,3 +1,5 @@
+import { parseSwapToken, type SwapToken } from "./tokens.js";
+
 export type Intent =
   | { action: "join"; name?: string }
   | { action: "hello" }
@@ -5,6 +7,7 @@ export type Intent =
   | { action: "balance" }
   | { action: "deposit" }
   | { action: "send"; amount: number; to: string; memo?: string }
+  | { action: "swap"; amount: number; tokenIn: SwapToken; tokenOut: SwapToken }
   | { action: "save"; name: string; target: string }
   | { action: "contacts" }
   | { action: "price"; symbol: string }
@@ -69,6 +72,13 @@ const LOCK_RE =
 const RATE_RE = /^(?:rate|dial\s*a?\s*rate|reference\s+rate|fx\s+rate)\b/i;
 const SHOP_RE = /^(?:shop(?:\s+for)?)\s+(.+)$/i;
 const BUY_RE = /^(?:buy|order|purchase)\s+([a-z0-9][a-z0-9-]{1,60}|\d{1,2})\s*$/i;
+/** "swap 10 usdc to eurc" / "exchange 5 euro for bitcoin" / "convert 1 usdc into cirbtc" */
+const TOKEN_WORD =
+  "(?:circle\\s+)?(?:bitcoin|btc|usdc|usd|usdt|eurc|eur|euros?|cirbtc|circbtc|dollars?|bucks?)";
+const SWAP_RE = new RegExp(
+  `(?:swap|exchange|convert)\\s+(\\d+(?:\\.\\d+)?)\\s+(${TOKEN_WORD})\\s+(?:to|for|into)\\s+(${TOKEN_WORD})\\b`,
+  "i",
+);
 
 function cleanPayee(raw: string): string {
   const t = raw.trim();
@@ -129,7 +139,16 @@ export function parseIntent(text: string): Intent {
     return { action: "shop", query: t.replace(/^(?:buy|shop)\s+/i, "").trim() || "tee" };
   }
 
-  if (/^balance\b/i.test(t) || /how much.*(have|left)/i.test(t)) return { action: "balance" };
+  if (
+    /^balance\b/i.test(t) ||
+    /\b(my\s+)?balance\b/i.test(t) ||
+    /what(?:'s| is|s)?\s+(?:my\s+)?balance\b/i.test(t) ||
+    /check\s+(?:my\s+)?balance\b/i.test(t) ||
+    /how much.*(have|left)/i.test(t) ||
+    /how\s+much\s+(?:do\s+i\s+have|money|usdc|usdt)\b/i.test(t)
+  ) {
+    return { action: "balance" };
+  }
   if (/^deposit\b/i.test(t) || /wallet address/i.test(t)) return { action: "deposit" };
   if (/^contacts\b/i.test(t)) return { action: "contacts" };
   if (/^(history|ledger|txs?|transactions)\b/i.test(t)) return { action: "history" };
@@ -199,6 +218,15 @@ export function parseIntent(text: string): Intent {
 
   const save = t.match(SAVE_RE);
   if (save) return { action: "save", name: save[1].toLowerCase(), target: save[2] };
+
+  const swap = t.match(SWAP_RE);
+  if (swap) {
+    const tokenIn = parseSwapToken(swap[2]!);
+    const tokenOut = parseSwapToken(swap[3]!);
+    if (tokenIn && tokenOut && tokenIn !== tokenOut) {
+      return { action: "swap", amount: Number(swap[1]), tokenIn, tokenOut };
+    }
+  }
 
   const send = t.match(SEND_RE);
   if (send) {

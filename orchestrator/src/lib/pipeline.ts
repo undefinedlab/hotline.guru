@@ -26,7 +26,8 @@ import {
 } from "./db.js";
 import { resolvePayee } from "./contacts.js";
 import { fulfillPendingClaimsFor, holdPendingClaim, pendingClaimDays } from "./claims.js";
-import { claimName, lookupName, suggestHotlineName } from "./hotlinens.js";
+import { claimName, lookupName, normalizeHotlineLabel, suggestHotlineName } from "./hotlinens.js";
+import { formatSpokenUsdc } from "./moneyFormat.js";
 import { attestSim, identitySummary, verifyNationalId } from "./identity.js";
 import { parseIntentSmart, parseNameAnswer, type Intent } from "./intent.js";
 import { evaluatePolicy, policyLimits } from "./policy.js";
@@ -57,6 +58,8 @@ import {
   transferUsdc,
   verifyPin,
 } from "./wallets.js";
+import { estimateArcSwap, executeArcSwap, getTokenBalance } from "./swap.js";
+import { spokenToken, type SwapToken } from "./tokens.js";
 import { log, shortHash } from "./log.js";
 import {
   cartCheckoutUrl,
@@ -107,6 +110,15 @@ type PendingSend = {
   memoText?: string;
 };
 
+type PendingSwap = {
+  type: "swap";
+  amount: number;
+  tokenIn: SwapToken;
+  tokenOut: SwapToken;
+  estimatedOut?: string;
+  idemKey?: string;
+};
+
 type PendingName = { type: "awaiting_name" };
 type PendingPolicy = { type: "awaiting_policy_confirm"; rules: FrozenRule[] };
 type PendingStanding = {
@@ -130,6 +142,7 @@ type PendingShop = {
 type AnyPending =
   | PendingName
   | PendingSend
+  | PendingSwap
   | PendingPolicy
   | PendingStanding
   | PendingLock
@@ -175,7 +188,7 @@ export async function handleMissedCall(phoneRaw: string): Promise<HandleResult> 
   }
   const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
   const avail = await availableUsdc(phone, bal);
-  const reply = `hotline.guru: balance ${avail.balance.toFixed(2)} USDC (${avail.available.toFixed(2)} available${avail.locked ? `, ${avail.locked.toFixed(2)} locked` : ""}).`;
+  const reply = `hotline.guru: balance ${formatSpokenUsdc(avail.balance)} (${formatSpokenUsdc(avail.available)} available${avail.locked ? `, ${formatSpokenUsdc(avail.locked)} locked` : ""}).`;
   if (canReceiveSms(phone)) void sms.send(phone, reply).catch(() => {});
   return { reply, data: { flash: true, ...avail } };
 }
@@ -547,6 +560,41 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
       };
     }
 
+    if (pending?.type === "swap") {
+      if (!isOnboarded(user)) {
+        return continueOnboardOrGreet(phone, user);
+      }
+      if (isPinLocked(user)) {
+        return {
+          reply: withName(
+            user,
+            `PIN locked after too many tries. Try again after ${user.pin_locked_until}.`,
+          ),
+        };
+      }
+      const pin =
+        (intent.action === "confirm" ? intent.pin : undefined) ??
+        (demoSimple() ? demoPin() : undefined);
+      if (!pin) {
+        return {
+          reply: "Enter your PIN on the keypad, or say yes and your PIN.",
+          needsPin: true,
+        };
+      }
+      if (!verifyPin(user, pin)) {
+        const updated = await recordPinFailure(phone, pinMaxFails(), pinLockMinutes());
+        if (isPinLocked(updated)) {
+          await setPending(phone, null);
+          return {
+            reply: withName(updated, "Too many wrong PINs. Swap cancelled. PIN locked for a while."),
+          };
+        }
+        return { reply: "Wrong PIN. Try again.", needsPin: true };
+      }
+      await clearPinFailures(phone);
+      return executeSwap(phone, pending, user);
+    }
+
     if (!pending || pending.type !== "send") {
       return { reply: "Nothing pending to confirm." };
     }
@@ -611,7 +659,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
 
   if (intent.action === "help" || intent.action === "unknown") {
     const limits = policyLimits(user.identity_tier ?? 0);
-    const tip = `Send · SHOP tee · BUY 1 · POLICY · STANDING · LOCK · flash · RATE. Tier ${limits.tier} soft $${limits.perTx}, hard $${limits.hardCeiling}.`;
+    const tip = `Send · SWAP · SHOP tee · BUY 1 · POLICY · STANDING · LOCK · flash · RATE. Tier ${limits.tier} soft $${limits.perTx}, hard $${limits.hardCeiling}.`;
     return {
       reply: withName(
         user,
@@ -856,10 +904,24 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "balance") {
     const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
     const avail = await availableUsdc(phone, bal);
+    const lockedBit = avail.locked ? `, ${formatSpokenUsdc(avail.locked)} locked` : "";
+    let extra = "";
+    try {
+      const [eurc, cirbtc] = await Promise.all([
+        getTokenBalance(user.wallet_address as Address, "EURC"),
+        getTokenBalance(user.wallet_address as Address, "cirBTC"),
+      ]);
+      const bits: string[] = [];
+      if (eurc > 1e-6) bits.push(`${eurc.toFixed(2)} euro`);
+      if (cirbtc > 1e-8) bits.push(`${cirbtc.toFixed(8)} circle bitcoin`);
+      if (bits.length) extra = ` Also ${bits.join(" and ")}.`;
+    } catch {
+      /* RPC optional extras */
+    }
     return {
       reply: withName(
         user,
-        `Balance: ${avail.balance.toFixed(2)} USDC on Arc (${avail.available.toFixed(2)} available${avail.locked ? `, ${avail.locked.toFixed(2)} locked` : ""}).`,
+        `Your balance is ${formatSpokenUsdc(avail.balance)} on Arc. ${formatSpokenUsdc(avail.available)} available${lockedBit}.${extra}`,
       ),
       data: avail,
     };
@@ -933,10 +995,22 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   if (intent.action === "send") {
     const payee = await resolvePayee(phone, intent.to);
     if (!payee) {
+      const asName = normalizeHotlineLabel(intent.to);
+      const looksName =
+        /\.hotline$/i.test(intent.to) ||
+        (/^[a-z][a-z0-9-]{1,31}$/i.test(asName) && !intent.to.startsWith("+") && !/^\d+$/.test(intent.to));
+      if (looksName && asName) {
+        return {
+          reply: withName(
+            user,
+            `${asName}.hotline is not registered yet. Ask them to call the hotline and say CLAIM ${asName}, or send to their phone with country code, like plus three five three…`,
+          ),
+        };
+      }
       return {
         reply: withName(
           user,
-          `I don't know "${intent.to}". Send to a phone number like +15551234567 or a .hotline name.`,
+          `I don't know "${intent.to}". Send to a phone number with country code, like plus three five three…, or a registered .hotline name.`,
         ),
       };
     }
@@ -995,6 +1069,61 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
         pendingClaim: payee.pendingClaim ?? false,
         idemKey: pendingSend.idemKey,
         offerMemo: true,
+      },
+    };
+  }
+
+  if (intent.action === "swap") {
+    const verdict = await evaluatePolicy(phone, intent);
+    await recordPolicyDecision({
+      phone,
+      action: "swap",
+      verdict: verdict.status,
+      reason: "reason" in verdict ? verdict.reason : undefined,
+      amount_usdc: intent.tokenIn === "USDC" ? intent.amount : undefined,
+      intent,
+    });
+    if (verdict.status === "reject") {
+      return { reply: withName(user, `No — ${verdict.reason}`) };
+    }
+
+    const estimate = await estimateArcSwap({
+      phone,
+      tokenIn: intent.tokenIn,
+      tokenOut: intent.tokenOut,
+      amountIn: intent.amount,
+    });
+    const pendingSwap: PendingSwap = {
+      type: "swap",
+      amount: intent.amount,
+      tokenIn: intent.tokenIn,
+      tokenOut: intent.tokenOut,
+      estimatedOut: estimate?.estimatedOutput || undefined,
+      idemKey: `swap:${phone}:${randomUUID()}`,
+    };
+
+    if (demoSimple()) {
+      return executeSwap(phone, pendingSwap, user);
+    }
+
+    await setPending(phone, pendingSwap);
+    const fromLabel = spokenToken(intent.tokenIn);
+    const toLabel = spokenToken(intent.tokenOut);
+    const quote = estimate?.estimatedOutput
+      ? ` About ${estimate.estimatedOutput} ${toLabel} expected (via Circle Swap / LiFi).`
+      : " Routed on Arc via Circle Swap (LiFi).";
+    return {
+      reply: withName(
+        user,
+        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quote} Enter your PIN on the keypad, then pound.`,
+      ),
+      needsPin: true,
+      data: {
+        amount: intent.amount,
+        tokenIn: intent.tokenIn,
+        tokenOut: intent.tokenOut,
+        estimatedOut: estimate?.estimatedOutput,
+        idemKey: pendingSwap.idemKey,
       },
     };
   }
@@ -1145,6 +1274,110 @@ async function executeSend(
     log.error("send failed", { phone, err });
     return {
       reply: withName(u, `Couldn't send: ${err}. Fund first (faucet or fund-user.sh).`),
+    };
+  }
+}
+
+async function executeSwap(
+  phone: string,
+  pending: PendingSwap,
+  user?: User | null,
+): Promise<HandleResult> {
+  const u = user ?? (await getUser(phone));
+  const idemKey =
+    pending.idemKey ??
+    `swap:${phone}:${pending.tokenIn}:${pending.tokenOut}:${pending.amount.toFixed(8)}`;
+
+  const claim = await claimIdempotency<HandleResult>(idemKey, phone);
+  if (claim.status === "completed") {
+    log.info("idempotent swap hit", { phone, idemKey: shortHash(idemKey) });
+    return claim.result;
+  }
+  if (claim.status === "inflight") {
+    return {
+      reply: withName(u, "That swap is already in progress. Wait a moment, then check HISTORY."),
+    };
+  }
+
+  const asyncMode =
+    process.env.ASYNC_SETTLE === "1" ||
+    (process.env.ASYNC_SETTLE === "voice" && process.env.HOTLINE_VOICE === "1");
+
+  const run = async (): Promise<HandleResult> => {
+    const { txHash, amountOut, explorer } = await executeArcSwap({
+      phone,
+      tokenIn: pending.tokenIn,
+      tokenOut: pending.tokenOut,
+      amountIn: pending.amount,
+    });
+    await addLedger({
+      phone,
+      kind: "swap",
+      amount_usdc: pending.tokenIn === "USDC" ? pending.amount : 0,
+      counterparty: `${pending.tokenIn}->${pending.tokenOut}`,
+      tx_hash: txHash,
+      meta: JSON.stringify({
+        tokenIn: pending.tokenIn,
+        tokenOut: pending.tokenOut,
+        amountIn: pending.amount,
+        amountOut,
+      }),
+    });
+    await setPending(phone, null);
+
+    const fromLabel = spokenToken(pending.tokenIn);
+    const toLabel = spokenToken(pending.tokenOut);
+    const outBit = amountOut ? ` Got about ${amountOut} ${toLabel}.` : "";
+    const result: HandleResult = {
+      reply: withName(
+        u,
+        `Swapped ${pending.amount} ${fromLabel} to ${toLabel}.${outBit} Tx ${txHash.slice(0, 12)}… ${explorer}`,
+      ),
+      data: {
+        txHash,
+        explorer,
+        tokenIn: pending.tokenIn,
+        tokenOut: pending.tokenOut,
+        amountIn: pending.amount,
+        amountOut,
+        idemKey,
+      },
+    };
+    await saveIdempotentResult(idemKey, phone, result);
+    if (canReceiveSms(phone)) {
+      void sms.send(phone, result.reply).catch(() => {});
+    }
+    log.info("swap ok", {
+      phone,
+      tokenIn: pending.tokenIn,
+      tokenOut: pending.tokenOut,
+      amount: pending.amount,
+      txHash,
+    });
+    return result;
+  };
+
+  if (asyncMode) {
+    void run().catch((e) => log.error("async swap failed", { err: String(e), phone }));
+    return {
+      reply: withName(
+        u,
+        `Swapping ${pending.amount} ${spokenToken(pending.tokenIn)} to ${spokenToken(pending.tokenOut)} now — I'll text you when it lands. You can hang up.`,
+      ),
+      data: { async: true, idemKey },
+    };
+  }
+
+  try {
+    return await run();
+  } catch (e) {
+    const err = e instanceof Error ? e.message : String(e);
+    log.error("swap failed", { phone, err });
+    return {
+      reply: withName(
+        u,
+        `Couldn't swap: ${err}. Need ${spokenToken(pending.tokenIn)} in the wallet — and a KIT_KEY for Circle Swap on Arc.`,
+      ),
     };
   }
 }

@@ -60,6 +60,15 @@ function digitResult(line: string): string {
   return line.match(/result=(-?\d+)/)?.[1] ?? "";
 }
 
+/** Asterisk WAIT FOR DIGIT → character, or null on timeout. */
+function waitDigitChar(line: string): string | null {
+  const raw = digitResult(line);
+  if (!raw || raw === "0" || raw === "-1") return null;
+  const code = Number(raw);
+  if (!Number.isFinite(code) || code <= 0) return null;
+  return String.fromCharCode(code);
+}
+
 async function sayVerbose(socket: net.Socket, msg: string) {
   const safe = msg.replace(/"/g, "'").slice(0, 200);
   await agiCommand(socket, `VERBOSE "${safe}" 1`);
@@ -70,7 +79,8 @@ async function speak(socket: net.Socket, msg: string, voiceOk: boolean) {
   if (!voiceOk) return;
   try {
     const { astStreamBase } = await synthesizeSpeech(msg);
-    await agiCommand(socket, `STREAM FILE ${astStreamBase} "#"`);
+    // Empty escape set: don't let early DTMF abort the prompt (drops PIN digits).
+    await agiCommand(socket, `STREAM FILE ${astStreamBase} ""`);
   } catch (e) {
     console.warn("[agi] TTS failed", e);
   }
@@ -78,10 +88,16 @@ async function speak(socket: net.Socket, msg: string, voiceOk: boolean) {
 
 async function listen(socket: net.Socket, prompt: string, voiceOk: boolean): Promise<string> {
   if (prompt) await speak(socket, prompt, voiceOk);
+  // Pause so the user can start speaking before we open the recorder.
+  await agiCommand(socket, "EXEC Wait 1");
+  await agiCommand(socket, "EXEC Playtones 400/300");
+  await agiCommand(socket, "EXEC Wait 0.35");
+  await agiCommand(socket, "EXEC StopPlaytones");
   const paths = sharedPaths();
+  // Up to 12s; end after ~5s of silence once speech started.
   const rec = await agiCommand(
     socket,
-    `RECORD FILE ${paths.astRecordBase} wav # 10000 0 s=2`,
+    `RECORD FILE ${paths.astRecordBase} wav # 12000 0 s=5`,
   );
   console.log(`[agi] record ${rec} → ${paths.hostWav}`);
 
@@ -98,19 +114,47 @@ async function listen(socket: net.Socket, prompt: string, voiceOk: boolean): Pro
   return text;
 }
 
-/** Collect PIN via keypad — never ask the caller to speak it. */
+/**
+ * Collect PIN via WAIT FOR DIGIT — does not need silence/ sound files.
+ * (GET DATA silence/1 was failing instantly: file missing → result=-1.)
+ */
 async function collectPinDigits(
   socket: net.Socket,
   voiceOk: boolean,
-  prompt: string | null = "Enter your PIN on the keypad, then pound.",
+  prompt: string | null = "Enter your 4 digit PIN on the keypad, then pound.",
 ): Promise<string | null> {
-  if (prompt) await speak(socket, prompt, voiceOk);
-  const res = await agiCommand(socket, "GET DATA silence/1 20000 6");
-  const digits = digitResult(res);
-  console.log(`[agi] PIN digits collected: ${digits ? `${digits.length} digits` : "none"}`);
-  if (!digits || digits === "0" || digits === "-1") return null;
-  if (!/^\d{4,6}$/.test(digits)) return null;
-  return digits;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const say =
+      attempt === 0
+        ? (prompt ?? "Enter your 4 digit PIN on the keypad, then pound.")
+        : "I did not get four digits. Enter your PIN on the keypad, then pound.";
+    await speak(socket, say, voiceOk);
+    await agiCommand(socket, "EXEC Wait 1");
+
+    let collected = "";
+    const first = waitDigitChar(await agiCommand(socket, "WAIT FOR DIGIT 5000"));
+    if (!first) {
+      console.log(`[agi] PIN: no digit in 5s attempt=${attempt + 1}`);
+      continue;
+    }
+    if (first === "#") continue;
+    if (first < "0" || first > "9") continue;
+    collected = first;
+
+    while (collected.length < 4) {
+      const next = waitDigitChar(await agiCommand(socket, "WAIT FOR DIGIT 5000"));
+      if (!next) {
+        console.log(`[agi] PIN: timeout after ${collected.length} digits attempt=${attempt + 1}`);
+        break;
+      }
+      if (next === "#") break;
+      if (next >= "0" && next <= "9") collected += next;
+    }
+
+    console.log(`[agi] PIN digits: ${collected.length} attempt=${attempt + 1}`);
+    if (/^\d{4}$/.test(collected)) return collected;
+  }
+  return null;
 }
 
 async function maybeRecordMemo(
@@ -150,17 +194,29 @@ async function runOnboarding(
 
   if (current.needsName) {
     let nameText = "";
-    if (forced && !/send|pay|transfer|pin/i.test(forced)) {
+    if (forced && !/send|pay|transfer|swap|exchange|convert|pin/i.test(forced)) {
       nameText = forced;
     } else if (voiceOk) {
-      nameText = await listen(socket, "", voiceOk);
+      for (let attempt = 0; attempt < 3 && !nameText; attempt++) {
+        const prompt =
+          attempt === 0
+            ? ""
+            : attempt === 1
+              ? "Sorry, say your first name again after the beep."
+              : "One more try — say your first name clearly after the beep.";
+        nameText = await listen(socket, prompt, voiceOk);
+      }
     } else {
       await speak(socket, "Text your name to the hotline SMS, then call again.", voiceOk);
       return false;
     }
     if (!nameText) {
-      await speak(socket, "I didn't catch your name. Call back when you're ready.", voiceOk);
-      return false;
+      await speak(
+        socket,
+        "I still can't hear you. Continuing as Guest — you can change your name later by text.",
+        voiceOk,
+      );
+      nameText = "Guest";
     }
     current = await handleMessage(caller, nameText);
     await speak(socket, current.reply, voiceOk);
@@ -168,7 +224,11 @@ async function runOnboarding(
   }
 
   if (current.needsSetPin) {
-    const pin = await collectPinDigits(socket, voiceOk, null);
+    const pin = await collectPinDigits(
+      socket,
+      voiceOk,
+      "Enter four digits on the keypad for your PIN, then pound.",
+    );
     if (!pin) {
       await speak(socket, "Setup paused. Call back to finish your PIN.", voiceOk);
       return false;
@@ -263,6 +323,8 @@ async function handleAgi(socket: net.Socket) {
 
   const voiceOk = await sttHealthy();
   console.log(`[agi] STT ${voiceOk ? "up" : "down — DTMF fallback"}`);
+  // Extra settle so the opening sentence is not clipped on PSTN.
+  await agiCommand(socket, "EXEC Wait 0.5");
 
   const forced = (env["agi_arg_1"] || "").trim().toLowerCase();
 
@@ -301,36 +363,47 @@ async function handleAgi(socket: net.Socket) {
   }
 
   let text: string;
-  if (forced && /send|pay|transfer|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
+  if (forced && /send|pay|transfer|swap|exchange|convert|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
     text = env["agi_arg_1"] || forced;
+    const result = await handleMessage(caller, text);
+    if (result.needsPin) {
+      await finishSpendPin(socket, caller, result, voiceOk);
+    } else if (result.needsSetPin || result.needsName) {
+      await runOnboarding(socket, caller, result, voiceOk, "");
+    } else {
+      await speak(socket, result.reply, voiceOk);
+      lastAgiReply.set(caller, result.reply);
+    }
   } else if (voiceOk) {
-    text = await listen(
-      socket,
-      "What can I do for you? Send money, set a rule, standing order, or ask the rate.",
-      voiceOk,
-    );
-    if (!text) {
-      await speak(socket, "I didn't catch that. Try the keypad.", voiceOk);
-      await dtmfFallback(socket, caller, voiceOk);
-      await agiCommand(socket, "HANGUP");
-      socket.end();
-      return;
+    // Multi-turn: ask briefly, wait for speech, answer, ask again (don't dump the command list).
+    for (let turn = 0; turn < 5; turn++) {
+      const prompt =
+        turn === 0 ? "What can I do for you?" : "Anything else? Or say goodbye.";
+      text = await listen(socket, prompt, voiceOk);
+      if (!text) {
+        if (turn === 0) {
+          await speak(socket, "I didn't catch that. Try saying balance, or price of bitcoin.", voiceOk);
+          continue;
+        }
+        await speak(socket, "Alright, call anytime.", voiceOk);
+        break;
+      }
+      if (/^(bye|goodbye|hang\s*up|that's\s*all|nothing|no)\b/i.test(text)) {
+        await speak(socket, "Goodbye.", voiceOk);
+        break;
+      }
+      const result = await handleMessage(caller, text);
+      if (result.needsPin) {
+        await finishSpendPin(socket, caller, result, voiceOk);
+      } else if (result.needsSetPin || result.needsName) {
+        await runOnboarding(socket, caller, result, voiceOk, "");
+      } else {
+        await speak(socket, result.reply, voiceOk);
+        lastAgiReply.set(caller, result.reply);
+      }
     }
   } else {
     await dtmfFallback(socket, caller, voiceOk);
-    await agiCommand(socket, "HANGUP");
-    socket.end();
-    return;
-  }
-
-  const result = await handleMessage(caller, text);
-  if (result.needsPin) {
-    await finishSpendPin(socket, caller, result, voiceOk);
-  } else if (result.needsSetPin || result.needsName) {
-    await runOnboarding(socket, caller, result, voiceOk, "");
-  } else {
-    await speak(socket, result.reply, voiceOk);
-    lastAgiReply.set(caller, result.reply);
   }
 
   await agiCommand(socket, "HANGUP");

@@ -50,6 +50,59 @@ export async function evaluatePolicy(
     return { status: "pass" };
   }
 
+  if (intent.action === "swap") {
+    const amount = intent.amount;
+    if (!(amount > 0) || Number.isNaN(amount)) {
+      return { status: "reject", reason: "Invalid swap amount" };
+    }
+    if (intent.tokenIn === intent.tokenOut) {
+      return { status: "reject", reason: "Pick two different tokens" };
+    }
+    // USDC out: same spend gates as send (locks, daily, ceiling). Non-USDC: hard ceiling on units.
+    if (intent.tokenIn === "USDC") {
+      if (amount > lim.hardCeiling) {
+        return {
+          status: "reject",
+          reason: `Hard ceiling: max $${lim.hardCeiling} per swap at tier ${lim.tier}`,
+        };
+      }
+      if (cooldownActive(user?.risk_cooldown_until) && amount > simCooldownMaxSend()) {
+        return {
+          status: "reject",
+          reason: `Risk cool-down — max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
+        };
+      }
+      if (user?.wallet_address) {
+        const avail = await availableUsdc(phone, 0);
+        if (avail.locked > 0) {
+          const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
+          const live = await availableUsdc(phone, bal);
+          if (amount > live.available + 1e-9) {
+            return {
+              status: "reject",
+              reason: `Savings lock: $${live.locked.toFixed(2)} locked — available $${live.available.toFixed(2)}`,
+            };
+          }
+        }
+      }
+      const sentToday = await sumLedgerToday(phone, "send");
+      const escrowToday = await sumLedgerToday(phone, "escrow_hold");
+      const swapToday = await sumLedgerToday(phone, "swap");
+      if (sentToday + escrowToday + swapToday + amount > lim.daily) {
+        return {
+          status: "reject",
+          reason: `Daily spend cap $${lim.daily} would be exceeded`,
+        };
+      }
+    } else if (amount > lim.hardCeiling) {
+      return {
+        status: "reject",
+        reason: `Hard ceiling: max ${lim.hardCeiling} ${intent.tokenIn} per swap at tier ${lim.tier}`,
+      };
+    }
+    return { status: "confirm", reason: "Confirm swap with your PIN" };
+  }
+
   if (intent.action !== "send") {
     return { status: "pass" };
   }

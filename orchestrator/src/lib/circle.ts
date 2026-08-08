@@ -9,13 +9,35 @@
  * Default money path is Circle. Lab/tests: WALLET_MODE=local.
  * Register entity secret once: npm run circle:register-secret
  */
-import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import { ARC_BLOCKCHAIN, USDC_ADDRESS } from "./arc.js";
 import { log } from "./log.js";
 
-type CircleClient = ReturnType<typeof initiateDeveloperControlledWalletsClient>;
+type CircleClient = {
+  createWallets: (args: unknown) => Promise<{ data?: { wallets?: Array<{ id?: string; address?: string }> } }>;
+  createTransaction: (args: unknown) => Promise<{ data?: { id?: string; state?: string } }>;
+  getTransaction: (args: unknown) => Promise<{ data?: { transaction?: { state?: string; txHash?: string } } }>;
+  getWalletTokenBalance: (args: unknown) => Promise<{ data?: { tokenBalances?: Array<{ token?: { symbol?: string }; amount?: string }> } }>;
+};
 
 let client: CircleClient | null = null;
+
+async function loadCircleFactory(): Promise<(opts: {
+  apiKey: string;
+  entitySecret: string;
+}) => CircleClient> {
+  const mod = await import("@circle-fin/developer-controlled-wallets");
+  const fn =
+    (mod as { initiateDeveloperControlledWalletsClient?: unknown })
+      .initiateDeveloperControlledWalletsClient ??
+    (mod as { default?: { initiateDeveloperControlledWalletsClient?: unknown } }).default
+      ?.initiateDeveloperControlledWalletsClient;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "@circle-fin/developer-controlled-wallets: initiateDeveloperControlledWalletsClient missing",
+    );
+  }
+  return fn as (opts: { apiKey: string; entitySecret: string }) => CircleClient;
+}
 
 export function circleConfigured(): boolean {
   return Boolean(
@@ -67,14 +89,15 @@ export function circleGasStationEnabled(): boolean {
   return circleAccountType() === "SCA";
 }
 
-function getClient(): CircleClient {
+async function getClient(): Promise<CircleClient> {
   if (!circleConfigured()) {
     throw new Error(
       "WALLET_MODE=circle needs CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID",
     );
   }
   if (!client) {
-    client = initiateDeveloperControlledWalletsClient({
+    const initiate = await loadCircleFactory();
+    client = initiate({
       apiKey: process.env.CIRCLE_API_KEY!,
       entitySecret: process.env.CIRCLE_ENTITY_SECRET!,
     });
@@ -87,7 +110,7 @@ export async function circleCreateWallet(phone: string): Promise<{
   address: string;
   accountType: "EOA" | "SCA";
 }> {
-  const c = getClient();
+  const c = await getClient();
   const walletSetId = process.env.CIRCLE_WALLET_SET_ID!;
   const accountType = circleAccountType();
   const res = await c.createWallets({
@@ -119,7 +142,7 @@ export async function circleTransferUsdc(params: {
   toAddress: string;
   amountUsdc: number;
 }): Promise<{ txHash: string; id: string; state: string }> {
-  const c = getClient();
+  const c = await getClient();
   const amount = params.amountUsdc.toFixed(6);
 
   const transferResponse = await c.createTransaction({
@@ -132,7 +155,7 @@ export async function circleTransferUsdc(params: {
       type: "level",
       config: { feeLevel: (process.env.CIRCLE_FEE_LEVEL as "LOW" | "MEDIUM" | "HIGH") ?? "MEDIUM" },
     },
-  } as unknown as Parameters<CircleClient["createTransaction"]>[0]);
+  });
 
   const transactionId = transferResponse.data?.id;
   let currentState = transferResponse.data?.state ?? "";
@@ -168,7 +191,7 @@ export async function circleTransferUsdc(params: {
 
 export async function circleWalletUsdcBalance(walletId: string): Promise<number | null> {
   try {
-    const c = getClient();
+    const c = await getClient();
     const res = await c.getWalletTokenBalance({ id: walletId });
     const balances = res.data?.tokenBalances ?? [];
     const usdc = balances.find(
@@ -190,7 +213,7 @@ export async function circleHealth(): Promise<{ ok: boolean; error?: string }> {
     return { ok: false, error: "circle not configured" };
   }
   try {
-    getClient();
+    await getClient();
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

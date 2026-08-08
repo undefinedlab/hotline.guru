@@ -22,6 +22,35 @@ describe("parseIntent", () => {
     }
   });
 
+  it("parses Arc swap pairs", () => {
+    assert.deepEqual(parseIntent("swap 10 usdc to eurc"), {
+      action: "swap",
+      amount: 10,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
+    assert.deepEqual(parseIntent("exchange 5 euro for usdc"), {
+      action: "swap",
+      amount: 5,
+      tokenIn: "EURC",
+      tokenOut: "USDC",
+    });
+    assert.deepEqual(parseIntent("convert 1 usdc into bitcoin"), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "cirBTC",
+    });
+    assert.deepEqual(parseIntent("swap 0.01 cirbtc to euro"), {
+      action: "swap",
+      amount: 0.01,
+      tokenIn: "cirBTC",
+      tokenOut: "EURC",
+    });
+    // fraud report must not become a token swap
+    assert.equal(parseIntent("sim swap").action, "report_sim");
+  });
+
   it("parses join / pin / confirm", () => {
     assert.deepEqual(parseIntent("JOIN alice"), { action: "join", name: "alice" });
     assert.deepEqual(parseIntent("PIN 1234"), { action: "set_pin", pin: "1234" });

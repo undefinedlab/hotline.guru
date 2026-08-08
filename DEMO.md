@@ -45,6 +45,7 @@ Settlement path proven on **Arc testnet** (Circle DCW / local EOAs).
 3. **Dial-a-rate:** dial `rate` → hear USDC reference, hang up — no account.  
 4. **Voice note:** send → optional memo → payee SMS carries the relationship.  
 5. **Standing / lock:** “send 50 to mom every month” · “lock 5 until December.”  
+5b. **Swap (Arc):** `swap 5 usdc to euro` · `swap 1 euro to usdc` · `swap 0.001 bitcoin to usdc` — PIN → Circle Swap Kit (USDC / EURC / cirBTC). Needs `KIT_KEY`.  
 6. **B2A:** `POST /v1/x402/ask` or `/call` with `X-Payment: lab` → SMS / StablePhone outbound.  
 7. **Marketplace:** `POST /v1/x402/discover` · `/price` · `/research` · `/proxy`  
 8. **Shop online:** `SHOP tee` / `POST /v1/x402/shop` → `BUY 1` cart link (human pays). Full multi-store: [shop.app/SKILL.md](https://shop.app/SKILL.md) · Circle merch [shop.circle.com/agents.md](https://shop.circle.com/agents.md)

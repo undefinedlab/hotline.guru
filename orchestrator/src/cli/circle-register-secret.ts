@@ -10,7 +10,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { registerEntitySecretCiphertext } from "@circle-fin/developer-controlled-wallets";
 import { loadEnv } from "../lib/env.js";
 
 loadEnv();
@@ -37,6 +36,9 @@ async function main() {
   fs.mkdirSync(recoveryDir, { recursive: true });
 
   console.log("Registering entity secret with Circle…");
+  const { registerEntitySecretCiphertext } = await import(
+    "@circle-fin/developer-controlled-wallets"
+  );
   const response = await registerEntitySecretCiphertext({
     apiKey,
     entitySecret,

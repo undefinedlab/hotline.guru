@@ -26,7 +26,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "${PORT:-8787}:8787"
-      # FastAGI stays on Docker network only (asterisk → orchestrator:4573). Do not publish.
+      # Host-network Asterisk reaches AGI on the host loopback only.
+      - "127.0.0.1:4573:4573"
     environment:
       HOTLINE_PROFILE: ${HOTLINE_PROFILE:-lab}
       PORT: "8787"
@@ -41,6 +42,9 @@ services:
       CIRCLE_GAS_STATION: ${CIRCLE_GAS_STATION:-1}
       CIRCLE_BLOCKCHAIN: ${CIRCLE_BLOCKCHAIN:-ARC-TESTNET}
       CIRCLE_FEE_LEVEL: ${CIRCLE_FEE_LEVEL:-MEDIUM}
+      KIT_KEY: ${KIT_KEY:-}
+      EURC_ADDRESS: ${EURC_ADDRESS:-0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a}
+      CIRBTC_ADDRESS: ${CIRBTC_ADDRESS:-0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF}
       ARC_RPC_URL: ${ARC_RPC_URL:-https://rpc.testnet.arc.network}
       USDC_ADDRESS: ${USDC_ADDRESS:-0x3600000000000000000000000000000000000000}
       STT_URL: http://stt:8090
@@ -116,11 +120,11 @@ services:
 
   asterisk:
     image: andrius/asterisk:latest
-    ports:
-      - "5060:5060/udp"
-      - "10000-10099:10000-10099/udp"
+    # Host networking: Docker's UDP proxy for RTP ranges often yields one-way audio
+    # (caller hears TTS, Asterisk records silence). Bind SIP/RTP on the public IP directly.
+    network_mode: host
     environment:
-      PHONE_AGI_HOST: orchestrator
+      PHONE_AGI_HOST: 127.0.0.1
     volumes:
       - ./telephony/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
       - ./telephony/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
@@ -135,8 +139,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    networks:
-      - hotline
 
 volumes:
   pgdata:

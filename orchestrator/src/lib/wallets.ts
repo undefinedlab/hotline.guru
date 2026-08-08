@@ -86,6 +86,14 @@ function decryptPk(blob: string): Hex {
   return `0x${dec.toString("hex")}` as Hex;
 }
 
+/** Local-mode only — Circle wallets have no decryptable key. */
+export function unlockLocalPrivateKey(walletRef: string): Hex {
+  if (walletRef.startsWith("circle:")) {
+    throw new Error("Circle wallets have no local private key");
+  }
+  return decryptPk(walletRef);
+}
+
 export function hashPin(pin: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(pin, `hotline:pin:${salt}`, 32).toString("hex");
