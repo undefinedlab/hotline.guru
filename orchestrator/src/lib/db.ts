@@ -154,6 +154,15 @@ CREATE TABLE IF NOT EXISTS savings_locks (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS savings_locks_phone ON savings_locks (phone, status);
+CREATE TABLE IF NOT EXISTS account_links (
+  channel TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (channel, external_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS account_links_channel_phone ON account_links (channel, phone);
+CREATE INDEX IF NOT EXISTS account_links_phone ON account_links (phone);
 `);
   ensureUserColumnsSqlite(db);
   ensurePolicyAuditHashSqlite(db);
@@ -293,6 +302,15 @@ CREATE TABLE IF NOT EXISTS savings_locks (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS savings_locks_phone ON savings_locks (phone, status);
+CREATE TABLE IF NOT EXISTS account_links (
+  channel TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (channel, external_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS account_links_channel_phone ON account_links (channel, phone);
+CREATE INDEX IF NOT EXISTS account_links_phone ON account_links (phone);
 `);
   await client.query(`
 ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_tier INTEGER NOT NULL DEFAULT 0;
@@ -746,6 +764,36 @@ export async function getUserByHotlineName(name: string): Promise<User | undefin
   const row = await getHotlineName(name);
   if (!row) return undefined;
   return getUser(row.phone);
+}
+
+/** Unique onboarded user by first name (case-insensitive). Null if 0 or 2+ matches. */
+export async function findUniqueUserByFirstName(raw: string): Promise<User | undefined> {
+  await initDb();
+  const needle = raw.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  if (needle.length < 2) return undefined;
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT * FROM users
+       WHERE name IS NOT NULL
+         AND lower(split_part(name, ' ', 1)) = $1
+         AND phone LIKE '+%'
+         AND pin_hash IS NOT NULL`,
+      [needle],
+    );
+    if (r.rows.length !== 1) return undefined;
+    return mapUser(r.rows[0] as Record<string, unknown>);
+  }
+  const rows = sqliteDb()
+    .prepare(
+      `SELECT * FROM users
+       WHERE name IS NOT NULL
+         AND lower(substr(name, 1, instr(name || ' ', ' ') - 1)) = ?
+         AND phone LIKE '+%'
+         AND pin_hash IS NOT NULL`,
+    )
+    .all(needle) as Record<string, unknown>[];
+  if (rows.length !== 1) return undefined;
+  return mapUser(rows[0]);
 }
 
 /** Claim or re-claim a HotlineNS label for this phone. */
@@ -1649,4 +1697,122 @@ export async function releaseMaturedLocks(phone: string, nowIso: string): Promis
     )
     .run(p, nowIso);
   return info.changes;
+}
+
+/** Channel alias → canonical E.164 (Telegram chat id → phone). */
+export async function resolveLinkedPhone(
+  channel: string,
+  externalId: string,
+): Promise<string | null> {
+  await initDb();
+  const ch = channel.toLowerCase();
+  const ext = String(externalId).replace(/[^\d-]/g, "");
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT phone FROM account_links WHERE channel = $1 AND external_id = $2`,
+      [ch, ext],
+    );
+    return r.rows[0]?.phone ? String(r.rows[0].phone) : null;
+  }
+  const row = sqliteDb()
+    .prepare(`SELECT phone FROM account_links WHERE channel = ? AND external_id = ?`)
+    .get(ch, ext) as { phone?: string } | undefined;
+  return row?.phone ?? null;
+}
+
+export async function listLinksForPhone(phone: string): Promise<
+  Array<{ channel: string; external_id: string; phone: string; linked_at: string }>
+> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(
+      `SELECT channel, external_id, phone, linked_at FROM account_links WHERE phone = $1`,
+      [p],
+    );
+    return r.rows as Array<{
+      channel: string;
+      external_id: string;
+      phone: string;
+      linked_at: string;
+    }>;
+  }
+  return sqliteDb()
+    .prepare(`SELECT channel, external_id, phone, linked_at FROM account_links WHERE phone = ?`)
+    .all(p) as Array<{
+    channel: string;
+    external_id: string;
+    phone: string;
+    linked_at: string;
+  }>;
+}
+
+/**
+ * Bind channel external id → E.164. One chat per phone per channel (upsert).
+ */
+export async function linkChannelAccount(
+  channel: string,
+  externalId: string,
+  phone: string,
+): Promise<void> {
+  await initDb();
+  const ch = channel.toLowerCase();
+  const ext = String(externalId).replace(/[^\d-]/g, "");
+  const p = normalizePhone(phone);
+  if (!ext) throw new Error("empty channel external id");
+  if (!p.startsWith("+")) throw new Error("link target must be E.164 phone");
+
+  if (usingPostgres) {
+    // Drop prior link of this phone on same channel (another chat) and this chat's old phone.
+    await pool!.query(`DELETE FROM account_links WHERE channel = $1 AND phone = $2`, [ch, p]);
+    await pool!.query(
+      `INSERT INTO account_links (channel, external_id, phone)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (channel, external_id) DO UPDATE SET phone = EXCLUDED.phone, linked_at = NOW()`,
+      [ch, ext, p],
+    );
+    return;
+  }
+  const db = sqliteDb();
+  db.prepare(`DELETE FROM account_links WHERE channel = ? AND phone = ?`).run(ch, p);
+  db.prepare(
+    `INSERT INTO account_links (channel, external_id, phone) VALUES (?, ?, ?)
+     ON CONFLICT (channel, external_id) DO UPDATE SET phone = excluded.phone, linked_at = datetime('now')`,
+  ).run(ch, ext, p);
+}
+
+export async function countLedgerEntries(phone: string): Promise<number> {
+  await initDb();
+  const p = normalizePhone(phone);
+  if (usingPostgres) {
+    const r = await pool!.query(`SELECT COUNT(*)::int AS n FROM ledger WHERE phone = $1`, [p]);
+    return Number(r.rows[0]?.n ?? 0);
+  }
+  const row = sqliteDb()
+    .prepare(`SELECT COUNT(*) AS n FROM ledger WHERE phone = ?`)
+    .get(p) as { n: number };
+  return Number(row.n);
+}
+
+/** Drop an empty provisional tg: user row (sessions + user). Refuses if ledger or HotlineNS. */
+export async function deleteProvisionalTelegramUser(tgAccount: string): Promise<boolean> {
+  await initDb();
+  const p = normalizePhone(tgAccount);
+  if (!p.startsWith("tg:")) return false;
+  const user = await getUser(p);
+  if (!user) return false;
+  if (user.hotline_name) return false;
+  if ((await countLedgerEntries(p)) > 0) return false;
+
+  if (usingPostgres) {
+    await pool!.query(`DELETE FROM sessions WHERE phone = $1`, [p]);
+    await pool!.query(`DELETE FROM contacts WHERE phone = $1`, [p]);
+    await pool!.query(`DELETE FROM users WHERE phone = $1`, [p]);
+    return true;
+  }
+  const db = sqliteDb();
+  db.prepare(`DELETE FROM sessions WHERE phone = ?`).run(p);
+  db.prepare(`DELETE FROM contacts WHERE phone = ?`).run(p);
+  db.prepare(`DELETE FROM users WHERE phone = ?`).run(p);
+  return true;
 }

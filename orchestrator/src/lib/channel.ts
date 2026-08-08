@@ -1,8 +1,19 @@
 /**
  * Channel identity → hotline account key.
  * WhatsApp uses the same E.164 phone as SMS (phone = account).
- * Telegram has no phone by default → tg:<chat_id> until LINK (future).
+ * Telegram is an alias until Share-contact links chatId → E.164.
  */
+import {
+  linkChannelAccount,
+  normalizePhone,
+  resolveLinkedPhone,
+  deleteProvisionalTelegramUser,
+  getUser,
+  countLedgerEntries,
+} from "./db.js";
+import { ensureWallet } from "./wallets.js";
+import { log } from "./log.js";
+
 export type IngressChannel = "sms" | "whatsapp" | "telegram" | "api" | "voice";
 
 export function isTelegramAccount(account: string): boolean {
@@ -31,6 +42,10 @@ export function accountFromTelegram(chatId: string | number): string {
   return `tg:${id}`;
 }
 
+export function telegramChatIdFromAccount(account: string): string {
+  return account.replace(/^tg:/i, "");
+}
+
 export function parseChannelAccount(raw: string): { channel: IngressChannel; account: string } {
   const t = raw.trim();
   if (/^(tg|telegram):/i.test(t)) {
@@ -40,4 +55,75 @@ export function parseChannelAccount(raw: string): { channel: IngressChannel; acc
     return { channel: "whatsapp", account: accountFromWhatsApp(t.replace(/^(wa|whatsapp):/i, "")) };
   }
   return { channel: "sms", account: t };
+}
+
+/** Resolve tg: alias → linked E.164, or null if not linked yet. */
+export async function resolveCanonicalAccount(account: string): Promise<string | null> {
+  const a = normalizePhone(account);
+  if (isPhoneAccount(a)) return a;
+  if (!isTelegramAccount(a)) return a;
+  const chatId = telegramChatIdFromAccount(a);
+  return resolveLinkedPhone("telegram", chatId);
+}
+
+export type LinkTelegramResult =
+  | { ok: true; phone: string; reply: string }
+  | { ok: false; reply: string };
+
+/**
+ * Prove phone via Telegram Share-contact, then E.164 owns wallet/PIN/NS.
+ */
+export async function linkTelegramToPhone(
+  chatId: string | number,
+  contactPhone: string,
+): Promise<LinkTelegramResult> {
+  const ext = String(chatId).replace(/[^\d-]/g, "");
+  const phone = normalizePhone(contactPhone);
+  if (!ext) return { ok: false, reply: "Could not read your Telegram chat. Try /start again." };
+  if (!canReceiveSms(phone)) {
+    return {
+      ok: false,
+      reply: "That does not look like a mobile number. Share the phone on your Telegram account.",
+    };
+  }
+
+  const tgAccount = accountFromTelegram(ext);
+  const existingTg = await getUser(tgAccount);
+  if (existingTg?.hotline_name) {
+    const phoneUser = await getUser(phone);
+    if (phoneUser?.hotline_name && phoneUser.hotline_name !== existingTg.hotline_name) {
+      log.warn("telegram link refused, HotlineNS conflict", {
+        tg: tgAccount,
+        phone,
+        tgNs: existingTg.hotline_name,
+        phoneNs: phoneUser.hotline_name,
+      });
+      return {
+        ok: false,
+        reply: `This Telegram chat already claimed ${existingTg.hotline_name}.hotline under a different identity. Contact support to merge.`,
+      };
+    }
+  }
+  if (existingTg && (await countLedgerEntries(tgAccount)) > 0) {
+    log.warn("telegram link refused, provisional tg wallet has ledger", { tg: tgAccount, phone });
+    return {
+      ok: false,
+      reply: "This Telegram chat already has a separate wallet history. Contact support to merge onto your phone number.",
+    };
+  }
+
+  await ensureWallet(phone);
+  await linkChannelAccount("telegram", ext, phone);
+
+  if (existingTg) {
+    const dropped = await deleteProvisionalTelegramUser(tgAccount);
+    log.info("telegram provisional user cleanup", { tg: tgAccount, dropped });
+  }
+
+  log.info("telegram linked to phone", { chatId: ext, phone });
+  return {
+    ok: true,
+    phone,
+    reply: `Linked ${phone}. Your wallet, PIN and name live on this number, same as calling the hotline.`,
+  };
 }

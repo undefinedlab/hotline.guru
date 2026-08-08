@@ -31,6 +31,8 @@ npm run telephony && npm run start
 # optional: ASYNC_SETTLE=1 → "sending now, I'll text you" (no silent hold on the call)
 ```
 
+Telegram uses the **same number**: `/start` → Share contact → wallet/PIN/HotlineNS live on that E.164 (not on `@username` or bare `tg:`).
+
 `DEMO_SIMPLE=0` (default). Set `DEMO_SIMPLE=1` only for one-shot lab skips.
 
 ## Settlement claim (investor-safe)

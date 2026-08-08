@@ -49,7 +49,7 @@ import {
 } from "./retention.js";
 import { fetchCryptoPrice, phoneFraudLookup } from "./marketplace.js";
 import { createSmsProvider } from "./sms.js";
-import { canReceiveSms } from "./channel.js";
+import { canReceiveSms, isTelegramAccount } from "./channel.js";
 import {
   ensureWallet,
   exportDepositInfo,
@@ -197,6 +197,14 @@ async function expandBarePin(phone: string, text: string): Promise<string> {
 
 export async function handleMessage(phoneRaw: string, text: string): Promise<HandleResult> {
   const phone = normalizePhone(phoneRaw);
+  // Defense: money identity is E.164. Telegram must Share-contact before ingress resolves.
+  if (isTelegramAccount(phone)) {
+    return {
+      reply:
+        "Share your phone number in Telegram first. That number owns your wallet, PIN and name, same as calling the hotline.",
+      data: { needsPhoneLink: true },
+    };
+  }
   const effective = await expandBarePin(phone, text);
   const intent = await parseIntentSmart(effective);
   return dispatch(phone, intent, effective);

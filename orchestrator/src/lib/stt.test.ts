@@ -52,4 +52,10 @@ describe("normalizeTranscript", () => {
     assert.match(e, /send 1 dollar to \+353/);
     assert.equal(parseIntent(e).action, "send");
   });
+
+  it("repairs spoken hotline names", () => {
+    const n = normalizeTranscript("send one dollar to james hotline");
+    assert.match(n, /send 1 dollar to james\.hotline/);
+    assert.equal(parseIntent(n).action, "send");
+  });
 });

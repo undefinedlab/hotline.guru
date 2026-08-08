@@ -357,8 +357,13 @@ app.post("/webhooks/telegram", async (c) => {
       inbound.text,
       inbound.chatId,
       telegram,
+      { contactPhone: inbound.contactPhone },
     );
-    log.info("telegram inbound", { account: inbound.account, username: inbound.username });
+    log.info("telegram inbound", {
+      account: inbound.account,
+      username: inbound.username,
+      linked: Boolean(inbound.contactPhone),
+    });
     return c.json({ ok: true, handled: 1, reply: result.reply });
   } catch (e) {
     log.warn("telegram handle failed", { err: String(e), account: inbound.account });

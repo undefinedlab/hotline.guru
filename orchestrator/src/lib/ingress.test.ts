@@ -5,6 +5,8 @@ import {
   accountFromWhatsApp,
   canReceiveSms,
   isTelegramAccount,
+  linkTelegramToPhone,
+  resolveCanonicalAccount,
 } from "./channel.js";
 import { parseWhatsAppWebhook, whatsappVerifyChallenge } from "./whatsapp.js";
 import { MockTelegramProvider, parseTelegramUpdate } from "./telegram.js";
@@ -24,7 +26,7 @@ try {
   /* ok */
 }
 
-const { initDb, normalizePhone } = await import("./db.js");
+const { initDb, normalizePhone, getUser, resolveLinkedPhone } = await import("./db.js");
 await initDb();
 
 describe("channel identity", () => {
@@ -74,11 +76,37 @@ describe("webhook parsers", () => {
         message_id: 9,
         text: "hello",
         chat: { id: 777 },
-        from: { username: "bob" },
+        from: { id: 777, username: "bob" },
       },
     });
     assert.equal(inbound?.account, "tg:777");
     assert.equal(inbound?.text, "hello");
+  });
+
+  it("parses own Telegram contact share", () => {
+    const inbound = parseTelegramUpdate({
+      message: {
+        message_id: 10,
+        chat: { id: 888 },
+        from: { id: 888, username: "alice" },
+        contact: { phone_number: "353899494966", user_id: 888 },
+      },
+    });
+    assert.equal(inbound?.account, "tg:888");
+    assert.equal(inbound?.contactPhone, "+353899494966");
+    assert.equal(inbound?.text, "hi");
+  });
+
+  it("rejects third-party Telegram contact cards", () => {
+    const inbound = parseTelegramUpdate({
+      message: {
+        message_id: 11,
+        chat: { id: 888 },
+        from: { id: 888 },
+        contact: { phone_number: "+15551230099", user_id: 999 },
+      },
+    });
+    assert.equal(inbound, null);
   });
 
   it("answers WhatsApp verify challenge", () => {
@@ -101,11 +129,45 @@ describe("ingress replies on channel", () => {
     assert.equal(wa.sent[0]!.to, "15557770001");
   });
 
-  it("Telegram mock send after pipeline", async () => {
+  it("Telegram unlinked asks for Share contact and does not mint tg wallet", async () => {
     const tg = new MockTelegramProvider();
     const r = await handleInboundTelegram("tg:888001", "hi", "888001", tg);
-    assert.match(r.reply, /Welcome|name/i);
+    assert.match(r.reply, /Share your phone/i);
+    assert.equal(r.data?.needsPhoneLink, true);
     assert.equal(tg.sent.length, 1);
-    assert.equal(tg.sent[0]!.to, "888001");
+    assert.equal(tg.sent[0]!.opts?.requestContact, true);
+    assert.equal(await getUser("tg:888001"), undefined);
+  });
+
+  it("Telegram contact link uses E.164 wallet shared with phone", async () => {
+    const phone = "+15557770111";
+    // Pre-create phone account (as if they already called/SMS).
+    const { ensureWallet } = await import("./wallets.js");
+    const prior = await ensureWallet(phone);
+    const tg = new MockTelegramProvider();
+    const r = await handleInboundTelegram("tg:999002", "hi", "999002", tg, {
+      contactPhone: phone,
+    });
+    assert.match(r.reply, /Linked/i);
+    assert.equal(await resolveLinkedPhone("telegram", "999002"), phone);
+    assert.equal(await resolveCanonicalAccount("tg:999002"), phone);
+    const user = await getUser(phone);
+    assert.equal(user?.wallet_address, prior.wallet_address);
+    assert.equal(await getUser("tg:999002"), undefined);
+
+    // Second message routes as phone account.
+    const tg2 = new MockTelegramProvider();
+    const r2 = await handleInboundTelegram("tg:999002", "hi", "999002", tg2);
+    assert.equal(r2.data?.needsPhoneLink, undefined);
+    assert.match(r2.reply, /Welcome|name|Hey|what can I do/i);
+  });
+
+  it("linkTelegramToPhone creates phone wallet when new", async () => {
+    const linked = await linkTelegramToPhone("424201", "+15557770222");
+    assert.equal(linked.ok, true);
+    if (linked.ok) {
+      assert.equal(linked.phone, "+15557770222");
+      assert.ok(await getUser("+15557770222"));
+    }
   });
 });

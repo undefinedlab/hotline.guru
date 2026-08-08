@@ -1,5 +1,5 @@
 import { isAddress, type Address } from "viem";
-import { getContact, getUser, getUserByHotlineName, normalizePhone } from "./db.js";
+import { getContact, getUser, getUserByHotlineName, findUniqueUserByFirstName, normalizePhone } from "./db.js";
 import { displayHotline, normalizeHotlineLabel } from "./hotlinens.js";
 import { ensureWallet } from "./wallets.js";
 
@@ -86,6 +86,16 @@ export async function resolvePayee(fromPhone: string, to: string): Promise<Resol
         label: displayHotline(byNs.hotline_name ?? raw),
         address: byNs.wallet_address as Address,
         phone: byNs.phone,
+        provisioned: false,
+      };
+    }
+    // "send to james" / spoken name without .hotline — unique first name on a real phone.
+    const byName = await findUniqueUserByFirstName(normalizeHotlineLabel(raw));
+    if (byName) {
+      return {
+        label: byName.hotline_name ? displayHotline(byName.hotline_name) : byName.name ?? raw,
+        address: byName.wallet_address as Address,
+        phone: byName.phone,
         provisioned: false,
       };
     }

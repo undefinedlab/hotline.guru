@@ -66,6 +66,10 @@ export function normalizeTranscript(raw: string): string {
   // "clumps for 1 dollar to james" → "send for 1 dollar…" → drop stray "for"
   t = t.replace(/\b(send|pay|transfer)\s+for\s+(\d+)/g, "$1 $2");
 
+  // Spoken HotlineNS: "james hotline" / "james.hotline"
+  t = t.replace(/\b([a-z][a-z0-9-]{1,31})\s+hotline\b/gi, "$1.hotline");
+  t = t.replace(/\b([a-z][a-z0-9-]{1,31})\s+dot\s+hotline\b/gi, "$1.hotline");
+
   const words: Record<string, string> = {
     zero: "0",
     oh: "0",
