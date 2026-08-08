@@ -4,6 +4,7 @@ import type { Intent } from "./intent.js";
 import { applyUserRules } from "./policyRules.js";
 import { availableUsdc } from "./retention.js";
 import { getUsdcBalance } from "./wallets.js";
+import { quoteAirtimeCharge } from "./airtime.js";
 import type { Address } from "viem";
 
 export type PolicyVerdict =
@@ -88,7 +89,8 @@ export async function evaluatePolicy(
       const sentToday = await sumLedgerToday(phone, "send");
       const escrowToday = await sumLedgerToday(phone, "escrow_hold");
       const swapToday = await sumLedgerToday(phone, "swap");
-      if (sentToday + escrowToday + swapToday + amount > lim.daily) {
+      const topupToday = await sumLedgerToday(phone, "airtime");
+      if (sentToday + escrowToday + swapToday + topupToday + amount > lim.daily) {
         return {
           status: "reject",
           reason: `Daily spend cap $${lim.daily} would be exceeded`,
@@ -101,6 +103,49 @@ export async function evaluatePolicy(
       };
     }
     return { status: "confirm", reason: "Confirm swap with your PIN" };
+  }
+
+  if (intent.action === "topup") {
+    const amount = quoteAirtimeCharge(intent.amount, intent.currency);
+    if (!(amount > 0) || Number.isNaN(amount)) {
+      return { status: "reject", reason: "Invalid airtime amount" };
+    }
+    if (amount > lim.hardCeiling) {
+      return {
+        status: "reject",
+        reason: `Hard ceiling: max $${lim.hardCeiling} per top-up at tier ${lim.tier}`,
+      };
+    }
+    if (cooldownActive(user?.risk_cooldown_until) && amount > simCooldownMaxSend()) {
+      return {
+        status: "reject",
+        reason: `Risk cool-down, max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
+      };
+    }
+    if (user?.wallet_address) {
+      const avail = await availableUsdc(phone, 0);
+      if (avail.locked > 0) {
+        const bal = await getUsdcBalance(user.wallet_address as Address, user.wallet_ref);
+        const live = await availableUsdc(phone, bal);
+        if (amount > live.available + 1e-9) {
+          return {
+            status: "reject",
+            reason: `Savings lock: $${live.locked.toFixed(2)} locked, available $${live.available.toFixed(2)}`,
+          };
+        }
+      }
+    }
+    const sentToday = await sumLedgerToday(phone, "send");
+    const escrowToday = await sumLedgerToday(phone, "escrow_hold");
+    const swapToday = await sumLedgerToday(phone, "swap");
+    const topupToday = await sumLedgerToday(phone, "airtime");
+    if (sentToday + escrowToday + swapToday + topupToday + amount > lim.daily) {
+      return {
+        status: "reject",
+        reason: `Daily spend cap $${lim.daily} would be exceeded`,
+      };
+    }
+    return { status: "confirm", reason: "Confirm airtime with your PIN" };
   }
 
   if (intent.action !== "send") {

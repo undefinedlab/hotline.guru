@@ -194,7 +194,7 @@ async function runOnboarding(
 
   if (current.needsName) {
     let nameText = "";
-    if (forced && !/send|pay|transfer|swap|exchange|convert|pin/i.test(forced)) {
+    if (forced && !/send|pay|transfer|swap|exchange|convert|top\s*up|airtime|reload|pin/i.test(forced)) {
       nameText = forced;
     } else if (voiceOk) {
       for (let attempt = 0; attempt < 3 && !nameText; attempt++) {
@@ -248,8 +248,9 @@ async function finishSpendPin(
   voiceOk: boolean,
 ): Promise<HandleResult> {
   let current = result;
-  await speak(socket, current.reply, voiceOk);
-  lastAgiReply.set(caller, current.reply);
+  // Confirm once (no "enter PIN" in the text) — then collect digits once.
+  await speak(socket, current.spoken ?? current.reply, voiceOk);
+  lastAgiReply.set(caller, current.spoken ?? current.reply);
 
   await maybeRecordMemo(socket, caller, current, voiceOk);
 
@@ -258,7 +259,7 @@ async function finishSpendPin(
       socket,
       voiceOk,
       attempt === 0
-        ? "Enter your PIN, then pound."
+        ? "Enter your PIN on the keypad, then pound."
         : "Wrong PIN. Try once more, then pound.",
     );
     if (!pin) {
@@ -268,16 +269,16 @@ async function finishSpendPin(
       return { reply: "Cancelled." };
     }
     current = await handleMessage(caller, `CONFIRM ${pin}`);
-    await speak(socket, current.reply, voiceOk);
-    lastAgiReply.set(caller, current.reply);
+    await speak(socket, current.spoken ?? current.reply, voiceOk);
+    lastAgiReply.set(caller, current.spoken ?? current.reply);
     if (!current.needsPin) break;
   }
 
   if (current.needsPin) {
     await handleMessage(caller, "cancel");
-    await speak(socket, "Too many wrong PINs. Send cancelled.", voiceOk);
-    lastAgiReply.set(caller, "Too many wrong PINs. Send cancelled.");
-    return { reply: "Too many wrong PINs. Send cancelled." };
+    await speak(socket, "Too many wrong PINs. Cancelled.", voiceOk);
+    lastAgiReply.set(caller, "Too many wrong PINs. Cancelled.");
+    return { reply: "Too many wrong PINs. Cancelled." };
   }
 
   return current;
@@ -304,8 +305,8 @@ async function dtmfFallback(socket: net.Socket, caller: string, voiceOk: boolean
   if (result.needsPin) {
     await finishSpendPin(socket, caller, result, voiceOk);
   } else {
-    await speak(socket, result.reply, voiceOk);
-    lastAgiReply.set(caller, result.reply);
+    await speak(socket, result.spoken ?? result.reply, voiceOk);
+    lastAgiReply.set(caller, result.spoken ?? result.reply);
   }
 }
 
@@ -363,7 +364,7 @@ async function handleAgi(socket: net.Socket) {
   }
 
   let text: string;
-  if (forced && /send|pay|transfer|swap|exchange|convert|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
+  if (forced && /send|pay|transfer|swap|exchange|convert|top\s*up|airtime|reload|balance|history|help|policy|rate|lock|standing/i.test(forced)) {
     text = env["agi_arg_1"] || forced;
     const result = await handleMessage(caller, text);
     if (result.needsPin) {
@@ -371,18 +372,21 @@ async function handleAgi(socket: net.Socket) {
     } else if (result.needsSetPin || result.needsName) {
       await runOnboarding(socket, caller, result, voiceOk, "");
     } else {
-      await speak(socket, result.reply, voiceOk);
-      lastAgiReply.set(caller, result.reply);
+      await speak(socket, result.spoken ?? result.reply, voiceOk);
+      lastAgiReply.set(caller, result.spoken ?? result.reply);
     }
   } else if (voiceOk) {
-    // Multi-turn: ask briefly, wait for speech, answer, ask again (don't dump the command list).
+    // Greeting already asked "what can I do for you?" — first turn is beep-only listen.
     for (let turn = 0; turn < 5; turn++) {
-      const prompt =
-        turn === 0 ? "What can I do for you?" : "Anything else? Or say goodbye.";
+      const prompt = turn === 0 ? "" : "Anything else? Or say goodbye.";
       text = await listen(socket, prompt, voiceOk);
       if (!text) {
         if (turn === 0) {
-          await speak(socket, "I didn't catch that. Try saying balance, or price of bitcoin.", voiceOk);
+          await speak(
+            socket,
+            "I didn't catch that. Try saying exchange one dollar to euro, or buy ten euro airtime.",
+            voiceOk,
+          );
           continue;
         }
         await speak(socket, "Alright, call anytime.", voiceOk);
@@ -398,8 +402,8 @@ async function handleAgi(socket: net.Socket) {
       } else if (result.needsSetPin || result.needsName) {
         await runOnboarding(socket, caller, result, voiceOk, "");
       } else {
-        await speak(socket, result.reply, voiceOk);
-        lastAgiReply.set(caller, result.reply);
+        await speak(socket, result.spoken ?? result.reply, voiceOk);
+        lastAgiReply.set(caller, result.spoken ?? result.reply);
       }
     }
   } else {

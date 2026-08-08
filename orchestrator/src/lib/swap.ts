@@ -33,7 +33,11 @@ const publicClient = createPublicClient({
 const CHAIN = "Arc_Testnet" as const;
 
 function kitConfig(): { kitKey?: string; slippageBps?: number } {
-  const kitKey = process.env.KIT_KEY?.trim() || process.env.CIRCLE_KIT_KEY?.trim();
+  let kitKey = process.env.KIT_KEY?.trim() || process.env.CIRCLE_KIT_KEY?.trim() || "";
+  // Console paste often omits the KIT_KEY: prefix; SDK requires KIT_KEY:<id>:<secret>
+  if (kitKey && !/^KIT_KEY:/i.test(kitKey) && kitKey.includes(":")) {
+    kitKey = `KIT_KEY:${kitKey}`;
+  }
   const slippage = Number(process.env.SWAP_SLIPPAGE_BPS ?? 300);
   return {
     ...(kitKey ? { kitKey } : {}),
