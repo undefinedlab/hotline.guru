@@ -29,6 +29,24 @@ describe("parseIntent", () => {
       tokenIn: "USDC",
       tokenOut: "EURC",
     });
+    assert.deepEqual(parseIntent("swap 1 dollar to euro"), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
+    assert.deepEqual(parseIntent("swap a dollar to euro"), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
+    assert.deepEqual(parseIntent("swap 1 to euro"), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
     assert.deepEqual(parseIntent("exchange 5 euro for usdc"), {
       action: "swap",
       amount: 5,
@@ -49,6 +67,18 @@ describe("parseIntent", () => {
     });
     // fraud report must not become a token swap
     assert.equal(parseIntent("sim swap").action, "report_sim");
+  });
+
+  it("normalizes spoken usdc into dollar swap", async () => {
+    const { normalizeTranscript } = await import("./stt.js");
+    const n = normalizeTranscript("swap one USDC to euro");
+    assert.match(n, /swap 1 dollar to euro/);
+    assert.deepEqual(parseIntent(n), {
+      action: "swap",
+      amount: 1,
+      tokenIn: "USDC",
+      tokenOut: "EURC",
+    });
   });
 
   it("parses join / pin / confirm", () => {

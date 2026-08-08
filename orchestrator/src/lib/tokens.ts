@@ -27,11 +27,11 @@ export const TOKEN_ADDRESS: Record<SwapToken, Address> = {
   cirBTC: CIRBTC_ADDRESS,
 };
 
-/** Spoken / SMS label for TTS. */
+/** Spoken / SMS label for TTS — prefer "dollars" / "euro" (STT-friendly). */
 export function spokenToken(t: SwapToken): string {
   if (t === "EURC") return "euro";
   if (t === "cirBTC") return "circle bitcoin";
-  return "USDC";
+  return "dollars";
 }
 
 /** Map spoken aliases → Swap Kit token alias. */

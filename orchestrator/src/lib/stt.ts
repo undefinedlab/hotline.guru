@@ -34,8 +34,15 @@ export function normalizeTranscript(raw: string): string {
   let t = raw.toLowerCase();
   t = t.replace(/[_./-]+/g, " ");
   t = t.replace(/\b(u\s*s\s*d\s*t|hus|usd\s*t|you\s*s\s*d\s*t)\b/g, "usdt");
-  t = t.replace(/\b(u\s*s\s*d\s*c|usd\s*c)\b/g, "usdc");
+  t = t.replace(/\b(u\s*s\s*d\s*c|usd\s*c|u\s*s\s*d\s*see|used\s*see)\b/g, "usdc");
   t = t.replace(/\bplus\b/g, "+");
+
+  // Prefer dollar/euro wording for swaps (STT often butchers "USDC")
+  t = t.replace(/\b(swapped|swop|spot)\b/g, "swap");
+  t = t.replace(/\beurope\b/g, "euro");
+  t = t.replace(/\busdc\b/g, "dollar");
+  t = t.replace(/\busdt\b/g, "dollar");
+  t = t.replace(/\busd\b/g, "dollar");
 
   const words: Record<string, string> = {
     zero: "0",
@@ -62,8 +69,23 @@ export function normalizeTranscript(raw: string): string {
     (m) => words[m] ?? m,
   );
 
-  // After first "to", scoop all digits into one phone number
+  // "swap 1 dollar 2 euro" (misheard "to") → "swap 1 dollar to euro"
+  t = t.replace(
+    /\b(dollar|dollars|euro|euros|bitcoin|btc)\s+2\s+(dollar|dollars|euro|euros|bitcoin|btc)\b/g,
+    "$1 to $2",
+  );
+
+  // "swap 1 to euro" → assume dollars
+  t = t.replace(
+    /\b(swap|exchange|convert)\s+(\d+(?:\.\d+)?)\s+(?:to|for|into)\s+(euro|euros|bitcoin|btc)\b/g,
+    "$1 $2 dollar to $3",
+  );
+
+  // After first "to", scoop all digits into one phone number — but not for FX words
   t = t.replace(/\bto\b([\s\S]*)$/m, (_m, rest: string) => {
+    if (/\b(euro|euros|bitcoin|btc|dollar|dollars)\b/i.test(rest)) {
+      return ` to${rest}`;
+    }
     const digits = String(rest).replace(/\D/g, "");
     if (digits.length >= 7 && digits.length <= 15) {
       return ` to +${digits}`;

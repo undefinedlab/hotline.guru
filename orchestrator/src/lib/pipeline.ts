@@ -659,7 +659,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
 
   if (intent.action === "help" || intent.action === "unknown") {
     const tip =
-      "Try saying balance, send one USDC to a phone number, swap one USDC to euro, or price of bitcoin.";
+      "Try saying balance, send one dollar to a phone number, swap one dollar to euro, or price of bitcoin.";
     return {
       reply: withName(
         user,

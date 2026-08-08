@@ -72,11 +72,17 @@ const LOCK_RE =
 const RATE_RE = /^(?:rate|dial\s*a?\s*rate|reference\s+rate|fx\s+rate)\b/i;
 const SHOP_RE = /^(?:shop(?:\s+for)?)\s+(.+)$/i;
 const BUY_RE = /^(?:buy|order|purchase)\s+([a-z0-9][a-z0-9-]{1,60}|\d{1,2})\s*$/i;
-/** "swap 10 usdc to eurc" / "exchange 5 euro for bitcoin" / "convert 1 usdc into cirbtc" */
+/** "swap 1 dollar to euro" / "exchange 5 euro for bitcoin" (USDC spoken as dollar) */
 const TOKEN_WORD =
   "(?:circle\\s+)?(?:bitcoin|btc|usdc|usd|usdt|eurc|eur|euros?|cirbtc|circbtc|dollars?|bucks?)";
+const SWAP_AMT = "(?:\\d+(?:\\.\\d+)?|a|an)";
 const SWAP_RE = new RegExp(
-  `(?:swap|exchange|convert)\\s+(\\d+(?:\\.\\d+)?)\\s+(${TOKEN_WORD})\\s+(?:to|for|into)\\s+(${TOKEN_WORD})\\b`,
+  `(?:swap|exchange|convert|change)\\s+(${SWAP_AMT})\\s+(${TOKEN_WORD})\\s+(?:to|for|into)\\s+(${TOKEN_WORD})\\b`,
+  "i",
+);
+/** "swap 1 to euro" — amount only, assume dollars */
+const SWAP_SHORT_RE = new RegExp(
+  `(?:swap|exchange|convert|change)\\s+(${SWAP_AMT})\\s+(?:to|for|into)\\s+(${TOKEN_WORD})\\b`,
   "i",
 );
 
@@ -219,12 +225,27 @@ export function parseIntent(text: string): Intent {
   const save = t.match(SAVE_RE);
   if (save) return { action: "save", name: save[1].toLowerCase(), target: save[2] };
 
+  const swapAmt = (raw: string) => {
+    const s = raw.toLowerCase();
+    if (s === "a" || s === "an") return 1;
+    return Number(raw);
+  };
+
   const swap = t.match(SWAP_RE);
   if (swap) {
     const tokenIn = parseSwapToken(swap[2]!);
     const tokenOut = parseSwapToken(swap[3]!);
-    if (tokenIn && tokenOut && tokenIn !== tokenOut) {
-      return { action: "swap", amount: Number(swap[1]), tokenIn, tokenOut };
+    const amount = swapAmt(swap[1]!);
+    if (tokenIn && tokenOut && tokenIn !== tokenOut && amount > 0) {
+      return { action: "swap", amount, tokenIn, tokenOut };
+    }
+  }
+  const swapShort = t.match(SWAP_SHORT_RE);
+  if (swapShort) {
+    const tokenOut = parseSwapToken(swapShort[2]!);
+    const amount = swapAmt(swapShort[1]!);
+    if (tokenOut && tokenOut !== "USDC" && amount > 0) {
+      return { action: "swap", amount, tokenIn: "USDC", tokenOut };
     }
   }
 

@@ -6,7 +6,7 @@ import { parseIntent } from "./intent.js";
 describe("normalizeTranscript", () => {
   it("repairs hus + digit phone into a send intent", () => {
     const n = normalizeTranscript("Send 10-HUS to plus 1-5-5-5-1-2-3-0-0-0-2");
-    assert.match(n, /usdt/);
+    assert.match(n, /dollar|usdt/);
     assert.match(n, /\+15551230002/);
     const intent = parseIntent(n);
     assert.equal(intent.action, "send");
@@ -19,5 +19,11 @@ describe("normalizeTranscript", () => {
   it("scoops split digits after to", () => {
     const n = normalizeTranscript("send 10 usdt to plus 1 5 5 1 to 3 0 0 0 2");
     assert.match(n, /\+155130002/);
+  });
+
+  it("keeps euro after to for swaps", () => {
+    const n = normalizeTranscript("swap 1 dollar to euro");
+    assert.equal(n, "swap 1 dollar to euro");
+    assert.equal(parseIntent(n).action, "swap");
   });
 });
