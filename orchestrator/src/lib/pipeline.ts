@@ -89,6 +89,8 @@ function pinLockMinutes(): number {
 
 export type HandleResult = {
   reply: string;
+  /** Shorter line for TTS — no tx hashes / URLs. Falls back to reply. */
+  spoken?: string;
   data?: Record<string, unknown>;
   needsName?: boolean;
   needsPin?: boolean;
@@ -718,7 +720,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Standing ${intent.amount} USDC to ${payee.label} ${intent.cadence}. Confirm with PIN.`,
+        `Standing ${intent.amount} dollars to ${payee.label} ${intent.cadence}.`,
       ),
       needsPin: true,
     };
@@ -767,7 +769,7 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Lock $${intent.amount} until ${until.toISOString().slice(0, 10)}? Confirm with PIN.`,
+        `Lock $${intent.amount} until ${until.toISOString().slice(0, 10)}?`,
       ),
       needsPin: true,
     };
@@ -1058,7 +1060,11 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     return {
       reply: withName(
         user,
-        `Confirm send ${intent.amount} USDC to ${payee.label}? Enter your PIN on the keypad, then pound.${claimHint}`,
+        `Confirm send ${intent.amount} dollars to ${payee.label}?${claimHint}`,
+      ),
+      spoken: withName(
+        user,
+        `Confirm send ${intent.amount} dollars to ${payee.label}?`,
       ),
       needsPin: true,
       needsMemo: !intent.memo,
@@ -1110,12 +1116,19 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
     const fromLabel = spokenToken(intent.tokenIn);
     const toLabel = spokenToken(intent.tokenOut);
     const quote = estimate?.estimatedOutput
-      ? ` About ${estimate.estimatedOutput} ${toLabel} expected (via Circle Swap / LiFi).`
-      : " Routed on Arc via Circle Swap (LiFi).";
+      ? ` About ${estimate.estimatedOutput} ${toLabel} expected.`
+      : "";
+    const quoteSms = estimate?.estimatedOutput
+      ? ` About ${estimate.estimatedOutput} ${toLabel} expected (via Circle Swap).`
+      : " Routed on Arc via Circle Swap.";
     return {
       reply: withName(
         user,
-        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quote} Enter your PIN on the keypad, then pound.`,
+        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quoteSms}`,
+      ),
+      spoken: withName(
+        user,
+        `Confirm swap ${intent.amount} ${fromLabel} to ${toLabel}?${quote}`,
       ),
       needsPin: true,
       data: {
@@ -1170,6 +1183,10 @@ async function executeSend(
         reply: withName(
           u,
           `Held ${pending.amount} USDC for ${pending.toLabel} in escrow (claim #${pc.id}). They get it when they onboard within ${pendingClaimDays()} days; else it returns to you.${memoBit} Tx ${txHash.slice(0, 12)}… ${explorer}`,
+        ),
+        spoken: withName(
+          u,
+          `Held ${pending.amount} dollars for ${pending.toLabel} in escrow. They get it when they join.`,
         ),
         data: {
           txHash,
@@ -1228,6 +1245,7 @@ async function executeSend(
         u,
         `Sent ${pending.amount} USDC to ${where}.${memoBit} Tx ${txHash.slice(0, 12)}… ${explorer}`,
       ),
+      spoken: withName(u, `Sent ${pending.amount} dollars to ${where}.${memoBit}`),
       data: {
         txHash,
         explorer,
@@ -1333,6 +1351,7 @@ async function executeSwap(
         u,
         `Swapped ${pending.amount} ${fromLabel} to ${toLabel}.${outBit} Tx ${txHash.slice(0, 12)}… ${explorer}`,
       ),
+      spoken: withName(u, `Done. Swapped ${pending.amount} ${fromLabel} to ${toLabel}.${outBit}`),
       data: {
         txHash,
         explorer,

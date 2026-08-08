@@ -248,8 +248,9 @@ async function finishSpendPin(
   voiceOk: boolean,
 ): Promise<HandleResult> {
   let current = result;
-  await speak(socket, current.reply, voiceOk);
-  lastAgiReply.set(caller, current.reply);
+  // Confirm once (no "enter PIN" in the text) — then collect digits once.
+  await speak(socket, current.spoken ?? current.reply, voiceOk);
+  lastAgiReply.set(caller, current.spoken ?? current.reply);
 
   await maybeRecordMemo(socket, caller, current, voiceOk);
 
@@ -258,7 +259,7 @@ async function finishSpendPin(
       socket,
       voiceOk,
       attempt === 0
-        ? "Enter your PIN, then pound."
+        ? "Enter your PIN on the keypad, then pound."
         : "Wrong PIN. Try once more, then pound.",
     );
     if (!pin) {
@@ -268,16 +269,16 @@ async function finishSpendPin(
       return { reply: "Cancelled." };
     }
     current = await handleMessage(caller, `CONFIRM ${pin}`);
-    await speak(socket, current.reply, voiceOk);
-    lastAgiReply.set(caller, current.reply);
+    await speak(socket, current.spoken ?? current.reply, voiceOk);
+    lastAgiReply.set(caller, current.spoken ?? current.reply);
     if (!current.needsPin) break;
   }
 
   if (current.needsPin) {
     await handleMessage(caller, "cancel");
-    await speak(socket, "Too many wrong PINs. Send cancelled.", voiceOk);
-    lastAgiReply.set(caller, "Too many wrong PINs. Send cancelled.");
-    return { reply: "Too many wrong PINs. Send cancelled." };
+    await speak(socket, "Too many wrong PINs. Cancelled.", voiceOk);
+    lastAgiReply.set(caller, "Too many wrong PINs. Cancelled.");
+    return { reply: "Too many wrong PINs. Cancelled." };
   }
 
   return current;
@@ -304,8 +305,8 @@ async function dtmfFallback(socket: net.Socket, caller: string, voiceOk: boolean
   if (result.needsPin) {
     await finishSpendPin(socket, caller, result, voiceOk);
   } else {
-    await speak(socket, result.reply, voiceOk);
-    lastAgiReply.set(caller, result.reply);
+    await speak(socket, result.spoken ?? result.reply, voiceOk);
+    lastAgiReply.set(caller, result.spoken ?? result.reply);
   }
 }
 
@@ -371,8 +372,8 @@ async function handleAgi(socket: net.Socket) {
     } else if (result.needsSetPin || result.needsName) {
       await runOnboarding(socket, caller, result, voiceOk, "");
     } else {
-      await speak(socket, result.reply, voiceOk);
-      lastAgiReply.set(caller, result.reply);
+      await speak(socket, result.spoken ?? result.reply, voiceOk);
+      lastAgiReply.set(caller, result.spoken ?? result.reply);
     }
   } else if (voiceOk) {
     // Greeting already asked "what can I do for you?" — first turn is beep-only listen.
@@ -401,8 +402,8 @@ async function handleAgi(socket: net.Socket) {
       } else if (result.needsSetPin || result.needsName) {
         await runOnboarding(socket, caller, result, voiceOk, "");
       } else {
-        await speak(socket, result.reply, voiceOk);
-        lastAgiReply.set(caller, result.reply);
+        await speak(socket, result.spoken ?? result.reply, voiceOk);
+        lastAgiReply.set(caller, result.spoken ?? result.reply);
       }
     }
   } else {
