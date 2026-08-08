@@ -375,14 +375,17 @@ async function handleAgi(socket: net.Socket) {
       lastAgiReply.set(caller, result.reply);
     }
   } else if (voiceOk) {
-    // Multi-turn: ask briefly, wait for speech, answer, ask again (don't dump the command list).
+    // Greeting already asked "what can I do for you?" — first turn is beep-only listen.
     for (let turn = 0; turn < 5; turn++) {
-      const prompt =
-        turn === 0 ? "What can I do for you?" : "Anything else? Or say goodbye.";
+      const prompt = turn === 0 ? "" : "Anything else? Or say goodbye.";
       text = await listen(socket, prompt, voiceOk);
       if (!text) {
         if (turn === 0) {
-          await speak(socket, "I didn't catch that. Try saying balance, or price of bitcoin.", voiceOk);
+          await speak(
+            socket,
+            "I didn't catch that. Try saying balance, send one USDC, or swap one USDC to euro.",
+            voiceOk,
+          );
           continue;
         }
         await speak(socket, "Alright, call anytime.", voiceOk);

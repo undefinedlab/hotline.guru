@@ -30,7 +30,7 @@ import { claimName, lookupName, normalizeHotlineLabel, suggestHotlineName } from
 import { formatSpokenUsdc } from "./moneyFormat.js";
 import { attestSim, identitySummary, verifyNationalId } from "./identity.js";
 import { parseIntentSmart, parseNameAnswer, type Intent } from "./intent.js";
-import { evaluatePolicy, policyLimits } from "./policy.js";
+import { evaluatePolicy } from "./policy.js";
 import {
   clearFrozenRules,
   compilePolicySmart,
@@ -658,8 +658,8 @@ async function dispatch(phone: string, intent: Intent, raw: string): Promise<Han
   }
 
   if (intent.action === "help" || intent.action === "unknown") {
-    const limits = policyLimits(user.identity_tier ?? 0);
-    const tip = `Send · SWAP · SHOP tee · BUY 1 · POLICY · STANDING · LOCK · flash · RATE. Tier ${limits.tier} soft $${limits.perTx}, hard $${limits.hardCeiling}.`;
+    const tip =
+      "Try saying balance, send one USDC to a phone number, swap one USDC to euro, or price of bitcoin.";
     return {
       reply: withName(
         user,
