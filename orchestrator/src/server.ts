@@ -2,8 +2,8 @@ import { loadEnv } from "./lib/env.js";
 loadEnv();
 
 import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { handleMessage } from "./lib/pipeline.js";
+import { Hono, type Context } from "hono";
+import { handleCallStart, handleMessage, type HandleResult } from "./lib/pipeline.js";
 import { createSmsProvider, handleInboundSms } from "./lib/sms.js";
 import { lastAgiReply, startAgiServer } from "./agi/server.js";
 import { checkDb, initDb, listPolicyAudit, normalizePhone } from "./lib/db.js";
@@ -21,6 +21,7 @@ import {
 } from "./lib/profile.js";
 import { ingressRateLimit } from "./lib/rateLimit.js";
 import { startWorkers } from "./lib/workers.js";
+import { callerText, textForPipeline, twiml, verifyTwilioSignature } from "./lib/twilio.js";
 import {
   createWhatsAppProvider,
   parseWhatsAppWebhook,
@@ -425,6 +426,70 @@ app.post("/webhooks/sms", async (c) => {
   if (limited) return limited;
   const result = await handleInboundSms(from, text, sms);
   return c.json(result);
+});
+
+/**
+ * Twilio Programmable Voice. Twilio POSTs here and reads our TwiML aloud, so a
+ * real inbound number works over HTTPS (ngrok included) with no public SIP host.
+ * Point the number's "A call comes in" webhook at /webhooks/twilio/voice.
+ */
+async function twilioParams(c: Context): Promise<{ params: Record<string, string>; ok: boolean; reason?: string }> {
+  const raw = await c.req.text();
+  const params: Record<string, string> = {};
+  for (const [k, v] of new URLSearchParams(raw)) params[k] = v;
+  // Twilio signs the exact URL it called, so honour the proxy headers ngrok sets.
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
+  const url = `${proto}://${host}${new URL(c.req.url).pathname}`;
+  const v = verifyTwilioSignature(url, params, c.req.header("x-twilio-signature"));
+  return { params, ok: v.ok, reason: v.reason };
+}
+
+function twimlFor(result: HandleResult): string {
+  // PIN turns collect keypad digits; the expectation rides in the action URL
+  // because the pipeline needs "PIN 1234" / "CONFIRM 1234", not bare digits.
+  const expect = result.needsSetPin ? "setpin" : result.needsPin ? "pin" : undefined;
+  return twiml({ reply: result.reply, expect });
+}
+
+app.post("/webhooks/twilio/voice", async (c) => {
+  const { params, ok, reason } = await twilioParams(c);
+  if (!ok) {
+    log.warn("twilio webhook rejected", { reason });
+    return c.text(reason ?? "unauthorized", 401);
+  }
+  const from = params.From ?? "";
+  if (!from) return c.text("From required", 400);
+  const limited = rateLimited(c, from);
+  if (limited) return limited;
+  const result = await handleCallStart(from);
+  log.info("twilio call start", { callSid: params.CallSid });
+  return c.body(twimlFor(result), 200, { "content-type": "text/xml" });
+});
+
+app.post("/webhooks/twilio/gather", async (c) => {
+  const { params, ok, reason } = await twilioParams(c);
+  if (!ok) {
+    log.warn("twilio webhook rejected", { reason });
+    return c.text(reason ?? "unauthorized", 401);
+  }
+  const from = params.From ?? "";
+  if (!from) return c.text("From required", 400);
+  const limited = rateLimited(c, from);
+  if (limited) return limited;
+
+  const text = callerText(params);
+  if (!text) {
+    // Nothing heard — one nudge, then hang up rather than loop forever on an open line.
+    const idle = c.req.query("idle") === "1";
+    return c.body(
+      twiml({ reply: idle ? "Still there? Call back anytime." : "Sorry, I didn't catch that.", hangup: idle }),
+      200,
+      { "content-type": "text/xml" },
+    );
+  }
+  const result = await handleMessage(from, textForPipeline(text, c.req.query("expect")));
+  return c.body(twimlFor(result), 200, { "content-type": "text/xml" });
 });
 
 const port = Number(process.env.PORT ?? 8787);
