@@ -30,7 +30,10 @@ fi
   echo "type=transport"
   echo "protocol=udp"
   echo "bind=0.0.0.0"
+  # Docker bridge + normal LAN ranges, so a handset on wifi is not treated as external.
   echo "local_net=172.16.0.0/12"
+  echo "local_net=10.0.0.0/8"
+  echo "local_net=192.168.0.0/16"
   if [ -n "$PUBLIC_IP" ]; then
     # Without these, a public host answers but audio goes nowhere (one-way / dead air).
     echo "external_signaling_address=$PUBLIC_IP"
@@ -110,6 +113,10 @@ allow=alaw
 auth=hotline-auth
 aors=hotline
 direct_media=no
+; A real handset sits behind wifi/Docker NAT — without these, audio is one-way.
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
 EOF
 } >"$OUT"
 
