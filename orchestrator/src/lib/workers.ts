@@ -33,7 +33,7 @@ export async function runDueStanding(): Promise<number> {
       if (result.needsPin) {
         const pin = process.env.STANDING_PIN ?? process.env.DEMO_PIN ?? "";
         if (!pin) {
-          log.warn("standing needs PIN — set STANDING_PIN or run interactively", {
+          log.warn("standing needs PIN, set STANDING_PIN or run interactively", {
             id: order.id,
           });
           continue;

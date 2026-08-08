@@ -70,7 +70,7 @@ export async function assertCanOpenPendingClaim(fromPhone: string): Promise<void
   const today = await sumPendingClaimsToday(fromPhone);
   if (today >= pendingClaimDailyCap()) {
     throw new Error(
-      `Pending-claim daily cap (${pendingClaimDailyCap()}) reached — prevents wallet-mint griefing`,
+      `Pending-claim daily cap (${pendingClaimDailyCap()}) reached, prevents wallet-mint griefing`,
     );
   }
 }
@@ -126,7 +126,7 @@ export async function fulfillPendingClaimsFor(payeePhone: string): Promise<numbe
     try {
       const pay = await escrowPayable(escrow, c.amount_usdc);
       if (pay <= 0) {
-        log.warn("pending claim underfunded — left held", { claimId: c.id, want: c.amount_usdc });
+        log.warn("pending claim underfunded, left held", { claimId: c.id, want: c.amount_usdc });
         continue;
       }
       const { txHash } = await transferUsdc({
@@ -167,7 +167,7 @@ export async function expirePendingClaims(now = new Date()): Promise<number> {
       }
       const pay = await escrowPayable(escrow, c.amount_usdc);
       if (pay <= 0) {
-        log.warn("expired claim underfunded — left held", { claimId: c.id, want: c.amount_usdc });
+        log.warn("expired claim underfunded, left held", { claimId: c.id, want: c.amount_usdc });
         continue;
       }
       const { txHash } = await transferUsdc({

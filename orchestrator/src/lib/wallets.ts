@@ -62,7 +62,7 @@ const publicClient = createPublicClient({
 function secretKey(): Buffer {
   const secret = process.env.WALLET_SECRET ?? "dev-only-change-me";
   if (secret === "dev-only-change-me" && process.env.HOTLINE_PROFILE === "staging") {
-    log.warn("WALLET_SECRET is still the default — set a strong secret in staging");
+    log.warn("WALLET_SECRET is still the default, set a strong secret in staging");
   }
   return scryptSync(secret, "hotline.guru", 32);
 }
@@ -250,7 +250,7 @@ export function exportDepositInfo(user: User) {
     explorer: ARC_EXPLORER,
     faucet: ARC_FAUCET,
     note: gasStation && mode === "circle"
-      ? "SCA wallet — Gas Station may sponsor fees on Arc testnet; still fund USDC for transfers"
+      ? "SCA wallet, Gas Station may sponsor fees on Arc testnet; still fund USDC for transfers"
       : "Request Arc Testnet USDC to this address",
     custody: mode,
     gasStation: mode === "circle" && circleGasStationEnabled(),

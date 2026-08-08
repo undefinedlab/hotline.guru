@@ -54,7 +54,7 @@ export function createTelegramProvider(): TelegramProvider {
     return new TelegramBotProvider(token);
   }
   if (kind === "bot" || kind === "live") {
-    log.warn("telegram live requested but TELEGRAM_BOT_TOKEN missing — using mock");
+    log.warn("telegram live requested but TELEGRAM_BOT_TOKEN missing, using mock");
   }
   return new MockTelegramProvider();
 }

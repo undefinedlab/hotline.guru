@@ -69,7 +69,7 @@ export async function evaluatePolicy(
       if (cooldownActive(user?.risk_cooldown_until) && amount > simCooldownMaxSend()) {
         return {
           status: "reject",
-          reason: `Risk cool-down — max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
+          reason: `Risk cool-down, max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
         };
       }
       if (user?.wallet_address) {
@@ -80,7 +80,7 @@ export async function evaluatePolicy(
           if (amount > live.available + 1e-9) {
             return {
               status: "reject",
-              reason: `Savings lock: $${live.locked.toFixed(2)} locked — available $${live.available.toFixed(2)}`,
+              reason: `Savings lock: $${live.locked.toFixed(2)} locked, available $${live.available.toFixed(2)}`,
             };
           }
         }
@@ -133,7 +133,7 @@ export async function evaluatePolicy(
   if (cooldownActive(user?.risk_cooldown_until) && amount > simCooldownMaxSend()) {
     return {
       status: "reject",
-      reason: `Risk cool-down active after SIM/port signal — max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
+      reason: `Risk cool-down active after SIM/port signal, max $${simCooldownMaxSend()} until ${user!.risk_cooldown_until}`,
     };
   }
 
@@ -142,7 +142,7 @@ export async function evaluatePolicy(
   if (needCb && !callbackOk(user?.callback_verified_until)) {
     return {
       status: "callback",
-      reason: `Amount over $${callbackThreshold(lim.perTx)} needs outbound callback — say CALLBACK then confirm when we call the number of record`,
+      reason: `Amount over $${callbackThreshold(lim.perTx)} needs outbound callback, say CALLBACK then confirm when we call the number of record`,
     };
   }
 
@@ -155,7 +155,7 @@ export async function evaluatePolicy(
       if (amount > live.available + 1e-9) {
         return {
           status: "reject",
-          reason: `Savings lock: $${live.locked.toFixed(2)} locked until maturity — available $${live.available.toFixed(2)}`,
+          reason: `Savings lock: $${live.locked.toFixed(2)} locked until maturity, available $${live.available.toFixed(2)}`,
         };
       }
     }
@@ -164,7 +164,7 @@ export async function evaluatePolicy(
   if (amount > lim.perTx) {
     return {
       status: "confirm",
-      reason: `Over soft per-tx cap $${lim.perTx} (tier ${lim.tier}) — confirm with PIN`,
+      reason: `Over soft per-tx cap $${lim.perTx} (tier ${lim.tier}), confirm with PIN`,
     };
   }
 

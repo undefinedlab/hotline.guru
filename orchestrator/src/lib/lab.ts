@@ -152,7 +152,7 @@ export async function requestFaucet(address: string): Promise<{ ok: boolean; det
     return {
       ok: false,
       detail:
-        "No CIRCLE_API_KEY — open https://faucet.circle.com (Arc Testnet) or set CIRCLE_API_KEY for auto-drip",
+        "No CIRCLE_API_KEY, open https://faucet.circle.com (Arc Testnet) or set CIRCLE_API_KEY for auto-drip",
     };
   }
   const res = await fetch("https://api.circle.com/v1/faucet/drips", {

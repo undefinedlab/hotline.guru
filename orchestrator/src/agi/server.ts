@@ -105,7 +105,7 @@ async function listen(socket: net.Socket, prompt: string, voiceOk: boolean): Pro
   if (!fs.existsSync(paths.hostWav)) {
     const gsm = paths.hostWav.replace(/\.wav$/, ".gsm");
     if (fs.existsSync(gsm)) {
-      console.warn("[agi] got gsm not wav — STT expects wav");
+      console.warn("[agi] got gsm not wav, STT expects wav");
     }
     return "";
   }
@@ -203,7 +203,7 @@ async function runOnboarding(
             ? ""
             : attempt === 1
               ? "Sorry, say your first name again after the beep."
-              : "One more try — say your first name clearly after the beep.";
+              : "One more try, say your first name clearly after the beep.";
         nameText = await listen(socket, prompt, voiceOk);
       }
     } else {
@@ -213,7 +213,7 @@ async function runOnboarding(
     if (!nameText) {
       await speak(
         socket,
-        "I still can't hear you. Continuing as Guest — you can change your name later by text.",
+        "I still can't hear you. Continuing as Guest, you can change your name later by text.",
         voiceOk,
       );
       nameText = "Guest";
@@ -322,7 +322,7 @@ async function handleAgi(socket: net.Socket) {
   console.log(`[agi] call from ${caller.replace(/\d(?=\d{4})/g, "*")}`);
 
   const voiceOk = await sttHealthy();
-  console.log(`[agi] STT ${voiceOk ? "up" : "down — DTMF fallback"}`);
+  console.log(`[agi] STT ${voiceOk ? "up" : "down, DTMF fallback"}`);
   // Extra settle so the opening sentence is not clipped on PSTN.
   await agiCommand(socket, "EXEC Wait 0.5");
 

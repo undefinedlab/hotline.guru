@@ -139,7 +139,7 @@ export async function discoverMarketplace(opts: {
     const lines = items.slice(0, limit).map((i) => {
       const name = i.metadata?.provider?.name ?? "?";
       const desc = i.metadata?.description ?? "";
-      return `${name}: ${i.resource}${desc ? ` — ${desc.slice(0, 80)}` : ""}`;
+      return `${name}: ${i.resource}${desc ? `, ${desc.slice(0, 80)}` : ""}`;
     });
     return {
       ok: true,
@@ -167,7 +167,7 @@ export async function payMarketplaceUrl(opts: {
       ok: false,
       mode: "mock",
       summary:
-        "Marketplace pay disabled — set MARKETPLACE_LIVE=1 + OPERATOR_ARC_ADDRESS + funded Gateway",
+        "Marketplace pay disabled, set MARKETPLACE_LIVE=1 + OPERATOR_ARC_ADDRESS + funded Gateway",
       url: opts.url,
     };
   }
@@ -233,10 +233,10 @@ function summarizePayResult(url: string, parsed: unknown): string {
     const s = JSON.stringify(parsed);
     if (s.length < 240) return s;
     const m = s.match(/"usd"\s*:\s*([0-9.]+)/i);
-    if (m) return `Paid ${url} — usd≈${m[1]}`;
+    if (m) return `Paid ${url}, usd≈${m[1]}`;
     const callId = s.match(/"call_id"\s*:\s*"([^"]+)"/i);
     if (callId) return `Outbound call queued (${callId[1]})`;
-    return `Paid ${url} — got ${s.length} bytes`;
+    return `Paid ${url}, got ${s.length} bytes`;
   } catch {
     return `Paid ${url}`;
   }

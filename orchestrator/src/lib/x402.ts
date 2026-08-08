@@ -110,14 +110,14 @@ export const X402_RESOURCES: X402Resource[] = [
   {
     capability: "shop",
     description:
-      "Search products (Circle shop + optional Google Shopping). Checkout always needs human approval — see shop.app/SKILL.md",
+      "Search products (Circle shop + optional Google Shopping). Checkout always needs human approval, see shop.app/SKILL.md",
     priceUsdc: Number(process.env.X402_PRICE_SHOP ?? 0.01),
     marketplace: MARKETPLACE_ALIASES.shopping.url,
   },
   {
     capability: "buy",
     description:
-      "Prepare a cart/checkout link for a Circle shop product (human must open & pay — never auto-complete)",
+      "Prepare a cart/checkout link for a Circle shop product (human must open & pay, never auto-complete)",
     priceUsdc: Number(process.env.X402_PRICE_BUY ?? 0.01),
   },
 ];
@@ -372,7 +372,7 @@ export async function fulfillX402(
     }
     return {
       ok: true,
-      summary: `Cart ready for ${product.title} ($${product.price}). Human must open and pay — agents never auto-complete. ${checkout ?? product.url}. Full multi-store buy: ${shopSkillUrl()}`,
+      summary: `Cart ready for ${product.title} ($${product.price}). Human must open and pay, agents never auto-complete. ${checkout ?? product.url}. Full multi-store buy: ${shopSkillUrl()}`,
       data: {
         product,
         checkoutUrl: checkout,

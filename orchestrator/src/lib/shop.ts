@@ -217,11 +217,11 @@ export async function shopSearch(opts: {
   }
 
   const lines = products.map(
-    (p, i) => `${i + 1}. ${p.title} — $${p.price} (${p.vendor ?? p.source}) ${p.url}`,
+    (p, i) => `${i + 1}. ${p.title}, $${p.price} (${p.vendor ?? p.source}) ${p.url}`,
   );
   return {
     ok: true,
-    summary: `Found ${products.length}: ${lines.join(" · ")}. Checkout needs your approval — reply BUY ${products[0]!.handle || 1} to open a cart link. Full Shop skill: ${SHOP_SKILL}`,
+    summary: `Found ${products.length}: ${lines.join(" · ")}. Checkout needs your approval, reply BUY ${products[0]!.handle || 1} to open a cart link. Full Shop skill: ${SHOP_SKILL}`,
     products,
     skillHint: SHOP_SKILL,
     ucp: await discoverShopUcp().catch(() => undefined),

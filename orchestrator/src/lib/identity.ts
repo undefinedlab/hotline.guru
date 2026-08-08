@@ -153,7 +153,7 @@ export async function attestSim(phone: string): Promise<{
     return {
       user: attested,
       mode: "live",
-      summary: `SIM attested. ${fraud.summary} You're tier 2 — ${identitySummary(attested)}`,
+      summary: `SIM attested. ${fraud.summary} You're tier 2, ${identitySummary(attested)}`,
     };
   }
 
@@ -168,6 +168,6 @@ export async function attestSim(phone: string): Promise<{
   return {
     user: attested,
     mode: "mock",
-    summary: `SIM attest recorded (lab mock — stands in for telco SIM-KYC). ${identitySummary(attested)}`,
+    summary: `SIM attest recorded (lab mock, stands in for telco SIM-KYC). ${identitySummary(attested)}`,
   };
 }

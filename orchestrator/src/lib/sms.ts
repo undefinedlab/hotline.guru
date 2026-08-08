@@ -71,7 +71,7 @@ export function createSmsProvider(): SmsProvider {
     const key = process.env.TELNYX_API_KEY;
     const from = process.env.TELNYX_FROM;
     if (!key || !from) {
-      console.warn("[sms] TELNYX_API_KEY/FROM missing — using mock");
+      console.warn("[sms] TELNYX_API_KEY/FROM missing, using mock");
       return new MockSmsProvider();
     }
     return new TelnyxSmsProvider(key, from);
@@ -81,7 +81,7 @@ export function createSmsProvider(): SmsProvider {
     const apiKey = process.env.AT_API_KEY;
     const from = process.env.AT_FROM;
     if (!username || !apiKey || !from) {
-      console.warn("[sms] AT credentials missing — using mock");
+      console.warn("[sms] AT credentials missing, using mock");
       return new MockSmsProvider();
     }
     return new AfricasTalkingSmsProvider(username, apiKey, from);

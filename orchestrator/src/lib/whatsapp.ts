@@ -62,7 +62,7 @@ export function createWhatsAppProvider(): WhatsAppProvider {
     const token = process.env.WHATSAPP_TOKEN ?? process.env.WHATSAPP_ACCESS_TOKEN;
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (!token || !phoneNumberId) {
-      log.warn("whatsapp live requested but missing token/phone id — using mock");
+      log.warn("whatsapp live requested but missing token/phone id, using mock");
       return new MockWhatsAppProvider();
     }
     return new MetaWhatsAppProvider(token, phoneNumberId);

@@ -74,7 +74,7 @@ function requireLabHttp(
   },
 ): Response | null {
   if (!labHttpApiAllowed()) {
-    return c.json({ error: "lab http api disabled — use verified channel webhooks" }, 403);
+    return c.json({ error: "lab http api disabled, use verified channel webhooks" }, 403);
   }
   if (
     !labApiAuthorized(c.req.header("authorization"), c.req.header("x-lab-token"))
@@ -228,7 +228,7 @@ app.get("/v1/x402", async (c) => {
   return c.json({
     service: "hotline.guru",
     framing:
-      "Agent-to-human last mile + Circle marketplace chaining — pay once, reach a phone or buy any allowlisted x402",
+      "Agent-to-human last mile + Circle marketplace chaining, pay once, reach a phone or buy any allowlisted x402",
     resources: X402_RESOURCES,
     marketplaceAliases: marketplaceAliasesForAgents(),
     catalog: "https://agents.circle.com/services",

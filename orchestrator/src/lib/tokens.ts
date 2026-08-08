@@ -48,4 +48,4 @@ export function isValidSwapPair(tokenIn: SwapToken, tokenOut: SwapToken): boolea
 }
 
 export const SWAP_PAIR_HINT =
-  "USDC, euro (EURC), or circle bitcoin (cirBTC) — e.g. swap 5 USDC to euro";
+  "USDC, euro (EURC), or circle bitcoin (cirBTC), e.g. swap 5 USDC to euro";

@@ -63,7 +63,7 @@ export function resolveWalletMode(): "circle" | "local" {
     if (!warnedMissingCircle) {
       warnedMissingCircle = true;
       log.warn(
-        "ALLOW_LOCAL_FALLBACK=1 — using local EOAs. Never enable outside lab; staging must use Circle.",
+        "ALLOW_LOCAL_FALLBACK=1, using local EOAs. Never enable outside lab; staging must use Circle.",
       );
     }
     return "local";
@@ -71,7 +71,7 @@ export function resolveWalletMode(): "circle" | "local" {
   if (!warnedMissingCircle) {
     warnedMissingCircle = true;
     log.error(
-      "WALLET_MODE=circle but CIRCLE_* missing — refusing silent local fallback. Set CIRCLE_* or WALLET_MODE=local / ALLOW_LOCAL_FALLBACK=1 (lab only).",
+      "WALLET_MODE=circle but CIRCLE_* missing, refusing silent local fallback. Set CIRCLE_* or WALLET_MODE=local / ALLOW_LOCAL_FALLBACK=1 (lab only).",
     );
   }
   return "circle";

@@ -25,7 +25,7 @@ async function main() {
   const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
   // .env.example ships an empty CIRCLE_ENTITY_SECRET= line — only a real value blocks.
   if (/^CIRCLE_ENTITY_SECRET=.+$/m.test(existing)) {
-    console.error("CIRCLE_ENTITY_SECRET already set in .env — refusing to overwrite.");
+    console.error("CIRCLE_ENTITY_SECRET already set in .env, refusing to overwrite.");
     console.error("Rotate via Circle Console + recovery file if compromised.");
     process.exit(1);
   }
@@ -50,7 +50,7 @@ async function main() {
     fs.writeFileSync(out, recoveryFile);
     console.log("Recovery file:", out);
   } else {
-    console.warn("No recoveryFile in response — download from Circle Console if offered.");
+    console.warn("No recoveryFile in response, download from Circle Console if offered.");
   }
 
   // Fill the placeholder line in place, else append — never leave two of the same key.
